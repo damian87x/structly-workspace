@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "expo": "https://registry.npmjs.org/expo/-/expo-52.0.37.tgz",
+    "expo-asset": "~11.0.5",
     "react": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
     "react-native": "https://registry.npmjs.org/react-native/-/react-native-0.76.7.tgz"
   }
