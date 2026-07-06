@@ -1,0 +1,20 @@
+{
+  "name": "structly",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "web": "expo start --web",
+    "test": "node scripts/verify-acceptance.js",
+    "audit:oauth": "node scripts/check-no-google-oauth.js"
+  },
+  "dependencies": {
+    "expo": "https://registry.npmjs.org/expo/-/expo-52.0.37.tgz",
+    "expo-asset": "~11.0.5",
+    "react": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+    "react-native": "https://registry.npmjs.org/react-native/-/react-native-0.76.7.tgz"
+  }
+}

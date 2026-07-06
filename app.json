@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Structly",
+    "slug": "structly",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "structly",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.structly.app"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
