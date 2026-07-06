@@ -4,6 +4,16 @@
     "slug": "structly",
     "version": "0.1.0",
     "orientation": "portrait",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Structly uses the camera to capture receipt photos.",
+          "microphonePermission": false,
+          "photosPermission": "Structly uses your photo library so you can choose receipt photos."
+        }
+      ]
+    ],
     "scheme": "structly",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
