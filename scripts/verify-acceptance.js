@@ -12,6 +12,7 @@ const {
 } = require("../src/lib/receiptCapture");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
 const { extractReceipt } = require("../src/lib/extractReceipt");
+const { processReceipts } = require("../src/lib/receiptPipeline");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -467,6 +468,85 @@ function verifyBuildSpreadsheetModule() {
   ]);
 }
 
+async function verifyReceiptPipelineModule() {
+  await withNetworkBlocked(async () => {
+    const images = [
+      { mimeType: "image/jpeg", uri: "file://clean.jpg" },
+      { mimeType: "image/jpeg", uri: "file://flagged.jpg" },
+      { mimeType: "image/jpeg", uri: "file://failing.jpg" },
+    ];
+    const calls = [];
+    const vision = {
+      async extractReceipt(image) {
+        calls.push(image);
+
+        if (image.uri === "file://failing.jpg") {
+          throw new Error("Vision extraction failed.");
+        }
+
+        if (image.uri === "file://flagged.jpg") {
+          return {
+            confidences: {
+              category: 0.95,
+              date: 0.95,
+              gross: 0.95,
+              net: 0.95,
+              vat: 0.95,
+              vendor: 0.95,
+            },
+            fields: {
+              category: "Meals",
+              date: "2026-07-06",
+              gross: "13.50",
+              net: "10.00",
+              vat: "2.00",
+              vendor: "Review Cafe",
+            },
+          };
+        }
+
+        return {
+          fields: {
+            category: { confidence: 0.93, value: "Office" },
+            date: { confidence: 0.97, value: "2026-07-05" },
+            gross: { confidence: 0.98, value: "24.00" },
+            net: { confidence: 0.98, value: "20.00" },
+            vat: { confidence: 0.98, value: "4.00" },
+            vendor: { confidence: 0.99, value: "Clean Market" },
+          },
+        };
+      },
+    };
+
+    const result = await processReceipts(images, { vision });
+
+    assert.deepEqual(calls, images);
+    assert.equal(result.receipts.length, 2);
+    assert.equal(result.failures.length, 1);
+    assert.equal(result.failures[0].index, 2);
+    assert.deepEqual(result.failures[0].image, images[2]);
+    assert.equal(result.failures[0].error.message, "Vision extraction failed.");
+    assert.deepEqual(result.sheet.csv.split("\n"), [
+      "vendor,date,net,vat,gross,category",
+      "Clean Market,2026-07-05,20,4,24,Office",
+      "Review Cafe,2026-07-06,10,2,13.5,Meals",
+    ]);
+    assert.equal(result.sheet.validation.needsReviewCount, 1);
+    assert.deepEqual(result.sheet.validation.needsReviewRows, [
+      {
+        index: 1,
+        issues: result.receipts[1].validation.issues,
+        reasons: ["net plus VAT does not equal gross."],
+        rowNumber: 2,
+      },
+    ]);
+    assert.equal(
+      result.sheet.validation.needsReviewRows[0].issues[0].type,
+      "vat-mismatch",
+    );
+  });
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -474,6 +554,7 @@ async function main() {
   await verifyReceiptCaptureModule();
   await verifyReceiptExtractionModule();
   verifyBuildSpreadsheetModule();
+  await verifyReceiptPipelineModule();
   console.log("Acceptance checks passed.");
 }
 
