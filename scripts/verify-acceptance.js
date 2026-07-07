@@ -10,6 +10,7 @@ const {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
+const { extractReceipt } = require("../src/lib/extractReceipt");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -207,11 +208,133 @@ async function verifyReceiptCaptureModule() {
   assert.equal(launchedAfterDenied, false);
 }
 
+function createReceiptClient(response) {
+  const calls = [];
+
+  return {
+    calls,
+    async extractReceipt(image) {
+      calls.push(image);
+      return response;
+    },
+  };
+}
+
+function hasIssue(result, type, field) {
+  return result.validation.issues.some(
+    (issue) => issue.type === type && issue.field === field,
+  );
+}
+
+async function withNetworkBlocked(run) {
+  const originalFetch = global.fetch;
+  let fetchCalls = 0;
+
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("Receipt extraction tests must use injected fake clients.");
+  };
+
+  try {
+    await run();
+    assert.equal(fetchCalls, 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+async function verifyReceiptExtractionModule() {
+  await withNetworkBlocked(async () => {
+    const image = {
+      mimeType: "image/jpeg",
+      uri: "file://receipt.jpg",
+    };
+
+    const cleanClient = createReceiptClient({
+      fields: {
+        category: { confidence: 0.93, value: "Travel" },
+        date: { confidence: 0.97, value: "1 July 2026" },
+        gross: { confidence: 0.98, value: "£12.00" },
+        net: { confidence: 0.98, value: "10.00" },
+        vat: { confidence: 0.98, value: "2.00" },
+        vendor: { confidence: 0.99, value: "Acme Supplies" },
+      },
+    });
+    const cleanResult = await extractReceipt(image, { client: cleanClient });
+
+    assert.deepEqual(cleanClient.calls, [image]);
+    assert.deepEqual(cleanResult.fields, {
+      category: "Travel",
+      date: "2026-07-01",
+      gross: 12,
+      net: 10,
+      vat: 2,
+      vendor: "Acme Supplies",
+    });
+    assert.equal(cleanResult.validation.needsReview, false);
+    assert.deepEqual(cleanResult.validation.issues, []);
+
+    const mismatchClient = createReceiptClient({
+      confidences: {
+        category: 0.95,
+        date: 0.95,
+        gross: 0.95,
+        net: 0.95,
+        vat: 0.95,
+        vendor: 0.95,
+      },
+      fields: {
+        category: "Meals",
+        date: "2026-07-02",
+        gross: "13.50",
+        net: "10.00",
+        vat: "2.00",
+        vendor: "Mismatch Cafe",
+      },
+    });
+    const mismatchResult = await extractReceipt(image, {
+      client: mismatchClient,
+    });
+
+    assert.equal(mismatchClient.calls.length, 1);
+    assert.equal(mismatchResult.fields.date, "2026-07-02");
+    assert.equal(mismatchResult.fields.net, 10);
+    assert.equal(mismatchResult.fields.vat, 2);
+    assert.equal(mismatchResult.fields.gross, 13.5);
+    assert.equal(mismatchResult.validation.needsReview, true);
+    assert.equal(hasIssue(mismatchResult, "vat-mismatch", "gross"), true);
+
+    const missingClient = createReceiptClient({
+      fields: {
+        category: { confidence: 0.4, value: "Office" },
+        date: "not a date",
+        gross: "24.00",
+        net: "20.00",
+        vat: "4.00",
+        vendor: "",
+      },
+    });
+    const missingResult = await extractReceipt(image, { client: missingClient });
+
+    assert.equal(missingClient.calls.length, 1);
+    assert.equal(missingResult.fields.vendor, null);
+    assert.equal(missingResult.fields.date, null);
+    assert.equal(missingResult.fields.net, 20);
+    assert.equal(missingResult.fields.vat, 4);
+    assert.equal(missingResult.fields.gross, 24);
+    assert.equal(missingResult.validation.needsReview, true);
+    assert.equal(hasIssue(missingResult, "missing-field", "vendor"), true);
+    assert.equal(hasIssue(missingResult, "missing-field", "date"), true);
+    assert.equal(hasIssue(missingResult, "low-confidence", "category"), true);
+  });
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
   await verifySupabasePasswordGrant();
   await verifyReceiptCaptureModule();
+  await verifyReceiptExtractionModule();
   console.log("Acceptance checks passed.");
 }
 
