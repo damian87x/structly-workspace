@@ -14,7 +14,9 @@
   "dependencies": {
     "expo": "https://registry.npmjs.org/expo/-/expo-52.0.37.tgz",
     "expo-asset": "~11.0.5",
+    "expo-file-system": "~18.0.11",
     "expo-image-picker": "~16.0.6",
+    "expo-sharing": "~13.0.1",
     "react": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
     "react-dom": "18.3.1",
     "react-native": "https://registry.npmjs.org/react-native/-/react-native-0.76.7.tgz",

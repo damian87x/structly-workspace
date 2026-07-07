@@ -11,6 +11,7 @@ const {
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
+const { exportSheet } = require("../src/lib/exportShare");
 const { extractReceipt } = require("../src/lib/extractReceipt");
 const { applyCorrection } = require("../src/lib/reviewQueue");
 
@@ -468,6 +469,82 @@ function verifyBuildSpreadsheetModule() {
   ]);
 }
 
+async function verifyExportShareModule() {
+  const csv = "vendor,date\nAcme Supplies,2026-07-01";
+  const events = [];
+  const writes = [];
+  const shares = [];
+  const result = await exportSheet(
+    {
+      csv,
+      filename: "../exports/monthly-receipts",
+    },
+    {
+      async share(uri) {
+        events.push(["share", uri]);
+        shares.push(uri);
+      },
+      async writeFile(uri, contents) {
+        events.push(["writeFile", uri]);
+        writes.push({ contents, uri });
+      },
+    },
+  );
+  const expectedUri = "file:///tmp/structly-exports/monthly-receipts.csv";
+
+  assert.deepEqual(writes, [{ contents: csv, uri: expectedUri }]);
+  assert.deepEqual(shares, [expectedUri]);
+  assert.deepEqual(events, [
+    ["writeFile", expectedUri],
+    ["share", expectedUri],
+  ]);
+  assert.deepEqual(result, { shared: true, uri: expectedUri });
+
+  const rejectedWrites = [];
+  const rejectedShares = [];
+  await assert.rejects(
+    () =>
+      exportSheet(
+        { csv: " \n\t", filename: "empty" },
+        {
+          async share(uri) {
+            rejectedShares.push(uri);
+          },
+          async writeFile(uri, contents) {
+            rejectedWrites.push({ contents, uri });
+          },
+        },
+      ),
+    /CSV content is required to export a sheet\./,
+  );
+  assert.deepEqual(rejectedWrites, []);
+  assert.deepEqual(rejectedShares, []);
+
+  const traversalWrites = [];
+  const traversalResult = await exportSheet(
+    {
+      csv: "vendor,date\nTraversal Cafe,2026-07-02",
+      filename: "../../private/../receipts.CSV",
+    },
+    {
+      async share() {},
+      async writeFile(uri, contents) {
+        traversalWrites.push({ contents, uri });
+      },
+    },
+  );
+  const traversalFileName = traversalWrites[0].uri.split("/").pop();
+
+  assert.equal(
+    traversalWrites[0].uri,
+    "file:///tmp/structly-exports/receipts.csv",
+  );
+  assert.equal(traversalResult.uri, traversalWrites[0].uri);
+  assert.equal(traversalFileName, "receipts.csv");
+  assert.equal(traversalFileName.includes(".."), false);
+  assert.equal(/[\\/]/.test(traversalFileName), false);
+}
+
 function createReviewRow(overrides = {}) {
   const fields = {
     category: "Meals",
@@ -555,6 +632,7 @@ async function main() {
   await verifyReceiptCaptureModule();
   await verifyReceiptExtractionModule();
   verifyBuildSpreadsheetModule();
+  await verifyExportShareModule();
   verifyReviewQueueCorrections();
   console.log("Acceptance checks passed.");
 }
