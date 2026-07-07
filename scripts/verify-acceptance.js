@@ -93,8 +93,19 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /<Image/);
   assert.match(appSource, /buildReceiptSheet/);
   assert.match(appSource, /exportReviewedReceipts/);
+  assert.ok(
+    appSource.includes('import { applyCorrection } from "./src/lib/reviewQueue";'),
+  );
   assert.match(appSource, /Rows:/);
   assert.match(appSource, /Needs review:/);
+  assert.match(appSource, /Review receipt/);
+  assert.match(appSource, /Correct \{reviewField\}/);
+  assert.match(appSource, /function handleReceiptCorrection/);
+  assert.match(
+    appSource,
+    /applyCorrection\(currentRows,\s*0,\s*\{\s*\[field\]: value\s*\}\s*\)/,
+  );
+  assert.match(appSource, /handleReceiptCorrection\(reviewField, value\)/);
   assert.match(appSource, /Export\/Share/);
   assert.match(appSource, /onPress={handleExportShare}/);
   assert.ok(fs.existsSync("app"));

@@ -22,6 +22,7 @@ import {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } from "./src/lib/receiptCapture";
+import { applyCorrection } from "./src/lib/reviewQueue";
 
 const REQUIRED_RECEIPT_FIELDS = [
   "vendor",
@@ -31,9 +32,18 @@ const REQUIRED_RECEIPT_FIELDS = [
   "gross",
   "category",
 ];
+const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
 
 function hasValue(value) {
   return value !== null && value !== undefined && value !== "";
+}
+
+function formatFieldValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value);
 }
 
 function getReceiptField(receipt, field) {
@@ -221,11 +231,8 @@ function CaptureScreen({ email }) {
   const [exportResult, setExportResult] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [receipt, setReceipt] = useState(null);
+  const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
-  const reviewedReceipts = useMemo(
-    () => (confirmedReceipt && receipt ? [buildReviewedReceipt(receipt)] : []),
-    [confirmedReceipt, receipt],
-  );
   const receiptSheet = useMemo(
     () => buildReceiptSheet(reviewedReceipts),
     [reviewedReceipts],
@@ -234,6 +241,17 @@ function CaptureScreen({ email }) {
     needsReviewCount: receiptSheet.validation.needsReviewCount,
     rowCount: reviewedReceipts.length,
   };
+  const needsReviewRow = receiptSheet.validation.needsReviewRows[0] || null;
+  const reviewReceipt = needsReviewRow
+    ? reviewedReceipts[needsReviewRow.index]
+    : null;
+  const reviewIssue = needsReviewRow?.issues?.[0] || null;
+  const reviewField = reviewIssue?.field || "gross";
+  const reviewFieldValue = reviewReceipt
+    ? formatFieldValue(reviewReceipt.fields?.[reviewField])
+    : "";
+  const reviewMessage =
+    reviewIssue?.message || needsReviewRow?.reasons?.[0] || "This row needs review.";
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {
@@ -244,6 +262,7 @@ function CaptureScreen({ email }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setReviewedReceipts([]);
     setSelectingSource(source);
 
     try {
@@ -274,13 +293,29 @@ function CaptureScreen({ email }) {
     setExportError(null);
     setExportResult(null);
     setReceipt(null);
+    setReviewedReceipts([]);
   }
 
   function handleUseReceipt() {
+    if (!receipt) {
+      return;
+    }
+
     setCaptureError(null);
     setExportError(null);
     setExportResult(null);
+    setReviewedReceipts([buildReviewedReceipt(receipt)]);
     setConfirmedReceipt(true);
+  }
+
+  function handleReceiptCorrection(field, value) {
+    setExportError(null);
+    setExportResult(null);
+    setReviewedReceipts((currentRows) =>
+      currentRows.length > 0
+        ? applyCorrection(currentRows, 0, { [field]: value })
+        : currentRows,
+    );
   }
 
   async function handleExportShare() {
@@ -345,42 +380,71 @@ function CaptureScreen({ email }) {
         </View>
 
         {receipt ? (
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Receipt preview</Text>
-            <Image
-              accessibilityLabel="Selected receipt preview"
-              resizeMode="cover"
-              source={{ uri: receipt.uri }}
-              style={styles.receiptPreview}
-            />
-            {confirmedReceipt ? (
-              <Text style={styles.panelValue}>Receipt selected</Text>
-            ) : null}
-            <View style={styles.actionRow}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={handleUseReceipt}
-                style={({ pressed }) => [
-                  styles.button,
-                  styles.actionButton,
-                  pressed ? styles.buttonPressed : null,
-                ]}
-              >
-                <Text style={styles.buttonText}>Use this receipt</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={handleRetakeOrChange}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  styles.actionButton,
-                  pressed ? styles.secondaryButtonPressed : null,
-                ]}
-              >
-                <Text style={styles.secondaryButtonText}>Retake or change</Text>
-              </Pressable>
+          <>
+            <View style={styles.panel}>
+              <Text style={styles.panelTitle}>Receipt preview</Text>
+              <Image
+                accessibilityLabel="Selected receipt preview"
+                resizeMode="cover"
+                source={{ uri: receipt.uri }}
+                style={styles.receiptPreview}
+              />
+              {confirmedReceipt ? (
+                <Text
+                  style={needsReviewRow ? styles.reviewValue : styles.panelValue}
+                >
+                  {needsReviewRow ? "Needs review" : "Review complete"}
+                </Text>
+              ) : null}
+              <View style={styles.actionRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handleUseReceipt}
+                  style={({ pressed }) => [
+                    styles.button,
+                    styles.actionButton,
+                    pressed ? styles.buttonPressed : null,
+                  ]}
+                >
+                  <Text style={styles.buttonText}>Use this receipt</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handleRetakeOrChange}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    styles.actionButton,
+                    pressed ? styles.secondaryButtonPressed : null,
+                  ]}
+                >
+                  <Text style={styles.secondaryButtonText}>Retake or change</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+
+            {needsReviewRow ? (
+              <View style={styles.panel}>
+                <Text style={styles.panelTitle}>Review receipt</Text>
+                <Text style={styles.panelMeta}>{reviewMessage}</Text>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Correct {reviewField}</Text>
+                  <TextInput
+                    accessibilityLabel={`Correct ${reviewField}`}
+                    keyboardType={
+                      AMOUNT_RECEIPT_FIELDS.includes(reviewField)
+                        ? "decimal-pad"
+                        : "default"
+                    }
+                    onChangeText={(value) =>
+                      handleReceiptCorrection(reviewField, value)
+                    }
+                    style={styles.input}
+                    value={reviewFieldValue}
+                  />
+                </View>
+              </View>
+            ) : null}
+          </>
         ) : (
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Add a receipt</Text>
@@ -528,6 +592,11 @@ const styles = StyleSheet.create({
     color: "#047857",
     fontSize: 16,
     fontWeight: "600",
+  },
+  reviewValue: {
+    color: "#B45309",
+    fontSize: 16,
+    fontWeight: "700",
   },
   receiptPreview: {
     aspectRatio: 3 / 4,
