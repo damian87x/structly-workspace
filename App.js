@@ -17,6 +17,10 @@ import {
   signInWithPassword,
 } from "./src/lib/supabaseAuth";
 import { buildReceiptSheet } from "./src/lib/buildSpreadsheet";
+import {
+  RECEIPT_FIELD_ROWS,
+  confirmReceiptExtraction,
+} from "./src/lib/confirmReceiptExtraction";
 import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
 import {
   pickReceiptFromLibrary,
@@ -24,19 +28,7 @@ import {
 } from "./src/lib/receiptCapture";
 import { applyCorrection } from "./src/lib/reviewQueue";
 
-const REQUIRED_RECEIPT_FIELDS = [
-  "vendor",
-  "date",
-  "net",
-  "vat",
-  "gross",
-  "category",
-];
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
-
-function hasValue(value) {
-  return value !== null && value !== undefined && value !== "";
-}
 
 function formatFieldValue(value) {
   if (value === null || value === undefined) {
@@ -44,56 +36,6 @@ function formatFieldValue(value) {
   }
 
   return String(value);
-}
-
-function getReceiptField(receipt, field) {
-  if (hasValue(receipt?.fields?.[field])) {
-    return receipt.fields[field];
-  }
-
-  if (field === "vendor") {
-    return receipt?.fileName || "Selected receipt";
-  }
-
-  if (field === "category") {
-    return receipt?.source || "Receipt";
-  }
-
-  return null;
-}
-
-function buildMissingFieldIssues(fields) {
-  return REQUIRED_RECEIPT_FIELDS
-    .filter((field) => !hasValue(fields[field]))
-    .map((field) => ({
-      field,
-      message: `${field} is missing.`,
-      type: "missing-field",
-    }));
-}
-
-function buildReviewedReceipt(receipt) {
-  const fields = REQUIRED_RECEIPT_FIELDS.reduce(
-    (nextFields, field) => ({
-      ...nextFields,
-      [field]: getReceiptField(receipt, field),
-    }),
-    {},
-  );
-  const existingIssues = Array.isArray(receipt?.validation?.issues)
-    ? receipt.validation.issues
-    : [];
-  const missingIssues = buildMissingFieldIssues(fields);
-  const issues = existingIssues.length > 0 ? existingIssues : missingIssues;
-
-  return {
-    fields,
-    validation: {
-      issues,
-      needsReview:
-        Boolean(receipt?.validation?.needsReview) || issues.length > 0,
-    },
-  };
 }
 
 export default function App() {
@@ -224,11 +166,12 @@ function SignInScreen({
   );
 }
 
-function CaptureScreen({ email }) {
+function CaptureScreen({ email, vision }) {
   const [captureError, setCaptureError] = useState(null);
   const [confirmedReceipt, setConfirmedReceipt] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [exportResult, setExportResult] = useState(null);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
@@ -252,6 +195,14 @@ function CaptureScreen({ email }) {
     : "";
   const reviewMessage =
     reviewIssue?.message || needsReviewRow?.reasons?.[0] || "This row needs review.";
+  const extractedReceipt = confirmedReceipt ? reviewedReceipts[0] : null;
+  const extractedFieldRows = extractedReceipt
+    ? RECEIPT_FIELD_ROWS.map(({ field, label }) => ({
+        displayValue: formatFieldValue(extractedReceipt.fields?.[field]),
+        field,
+        label,
+      }))
+    : [];
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {
@@ -296,16 +247,27 @@ function CaptureScreen({ email }) {
     setReviewedReceipts([]);
   }
 
-  function handleUseReceipt() {
-    if (!receipt) {
+  async function handleUseReceipt() {
+    if (!receipt || isExtracting) {
       return;
     }
 
     setCaptureError(null);
+    setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
-    setReviewedReceipts([buildReviewedReceipt(receipt)]);
-    setConfirmedReceipt(true);
+    setReviewedReceipts([]);
+    setIsExtracting(true);
+
+    try {
+      const result = await confirmReceiptExtraction(receipt, { vision });
+      setReviewedReceipts([result.receipt]);
+      setConfirmedReceipt(true);
+    } catch (error) {
+      setCaptureError(error?.message || "Unable to extract receipt fields.");
+    } finally {
+      setIsExtracting(false);
+    }
   }
 
   function handleReceiptCorrection(field, value) {
@@ -396,25 +358,52 @@ function CaptureScreen({ email }) {
                   {needsReviewRow ? "Needs review" : "Review complete"}
                 </Text>
               ) : null}
+              {isExtracting ? (
+                <Text style={styles.panelMeta}>Extracting receipt fields...</Text>
+              ) : null}
+              {extractedFieldRows.length > 0 ? (
+                <View style={styles.extractedFields}>
+                  {extractedFieldRows.map((fieldRow) => (
+                    <View key={fieldRow.field} style={styles.extractedFieldRow}>
+                      <Text style={styles.label}>{fieldRow.label}</Text>
+                      <Text style={styles.extractedFieldValue}>
+                        {fieldRow.displayValue || "Needs review"}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.actionRow}>
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isExtracting }}
+                  disabled={isExtracting}
                   onPress={handleUseReceipt}
                   style={({ pressed }) => [
                     styles.button,
                     styles.actionButton,
-                    pressed ? styles.buttonPressed : null,
+                    isExtracting ? styles.buttonDisabled : null,
+                    pressed && !isExtracting ? styles.buttonPressed : null,
                   ]}
                 >
-                  <Text style={styles.buttonText}>Use this receipt</Text>
+                  {isExtracting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.buttonText}>Use this receipt</Text>
+                  )}
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isExtracting }}
+                  disabled={isExtracting}
                   onPress={handleRetakeOrChange}
                   style={({ pressed }) => [
                     styles.secondaryButton,
                     styles.actionButton,
-                    pressed ? styles.secondaryButtonPressed : null,
+                    isExtracting ? styles.secondaryButtonDisabled : null,
+                    pressed && !isExtracting
+                      ? styles.secondaryButtonPressed
+                      : null,
                   ]}
                 >
                   <Text style={styles.secondaryButtonText}>Retake or change</Text>
@@ -545,6 +534,18 @@ const styles = StyleSheet.create({
   error: {
     color: "#B91C1C",
     fontSize: 14,
+    fontWeight: "600",
+  },
+  extractedFields: {
+    gap: 10,
+    marginTop: 4,
+  },
+  extractedFieldRow: {
+    gap: 4,
+  },
+  extractedFieldValue: {
+    color: "#111827",
+    fontSize: 16,
     fontWeight: "600",
   },
   field: {
