@@ -12,6 +12,7 @@ const {
 } = require("../src/lib/receiptCapture");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
 const { extractReceipt } = require("../src/lib/extractReceipt");
+const { applyCorrection } = require("../src/lib/reviewQueue");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -467,6 +468,86 @@ function verifyBuildSpreadsheetModule() {
   ]);
 }
 
+function createReviewRow(overrides = {}) {
+  const fields = {
+    category: "Meals",
+    date: "2026-07-05",
+    gross: 12.01,
+    net: 10,
+    vat: 1,
+    vendor: "Correction Cafe",
+    ...overrides,
+  };
+
+  return {
+    fields,
+    validation: {
+      issues: [
+        {
+          difference: 1.01,
+          expectedGross: 11,
+          field: "gross",
+          message: "net plus VAT does not equal gross.",
+          type: "vat-mismatch",
+        },
+      ],
+      needsReview: true,
+    },
+  };
+}
+
+function verifyReviewQueueCorrections() {
+  const originalRows = [
+    createReviewRow(),
+    {
+      fields: {
+        category: "Office",
+        date: "2026-07-06",
+        gross: 24,
+        net: 20,
+        vat: 4,
+        vendor: "Stable Supplies",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ];
+  const originalSnapshot = JSON.parse(JSON.stringify(originalRows));
+  const correctedRows = applyCorrection(originalRows, 0, { vat: "2.00" });
+
+  assert.notEqual(correctedRows, originalRows);
+  assert.notEqual(correctedRows[0], originalRows[0]);
+  assert.equal(correctedRows[1], originalRows[1]);
+  assert.notEqual(correctedRows[0].fields, originalRows[0].fields);
+  assert.deepEqual(originalRows, originalSnapshot);
+  assert.equal(correctedRows[0].fields.vat, 2);
+  assert.equal(correctedRows[0].validation.needsReview, false);
+  assert.deepEqual(correctedRows[0].validation.issues, []);
+
+  const stillInvalidRows = applyCorrection([createReviewRow()], 0, { vat: 1.5 });
+  const mismatchIssue = stillInvalidRows[0].validation.issues.find(
+    (issue) => issue.type === "vat-mismatch" && issue.field === "gross",
+  );
+
+  assert.equal(stillInvalidRows[0].validation.needsReview, true);
+  assert.ok(mismatchIssue);
+  assert.equal(
+    mismatchIssue.message,
+    "net plus VAT does not equal gross.",
+  );
+
+  assert.throws(
+    () => applyCorrection(originalRows, 2, { vat: 2 }),
+    /Review queue index 2 is out of range\./,
+  );
+  assert.throws(
+    () => applyCorrection(originalRows, -1, { vat: 2 }),
+    /Review queue index -1 is out of range\./,
+  );
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -474,6 +555,7 @@ async function main() {
   await verifyReceiptCaptureModule();
   await verifyReceiptExtractionModule();
   verifyBuildSpreadsheetModule();
+  verifyReviewQueueCorrections();
   console.log("Acceptance checks passed.");
 }
 
