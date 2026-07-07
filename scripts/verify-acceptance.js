@@ -10,6 +10,7 @@ const {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
+const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
 const { extractReceipt } = require("../src/lib/extractReceipt");
 
 const googleOAuthPatterns = [
@@ -329,12 +330,150 @@ async function verifyReceiptExtractionModule() {
   });
 }
 
+function verifyBuildSpreadsheetModule() {
+  const cleanSheet = buildReceiptSheet([
+    {
+      fields: {
+        category: "Office",
+        date: "2026-07-01",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Acme Supplies",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      fields: {
+        category: "Meals, team",
+        date: "2026-07-02",
+        gross: 6.6,
+        net: 5.5,
+        vat: 1.1,
+        vendor: 'Comma, "Quote" Ltd',
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ]);
+
+  assert.deepEqual(cleanSheet.csv.split("\n"), [
+    "vendor,date,net,vat,gross,category",
+    "Acme Supplies,2026-07-01,10,2,12,Office",
+    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team"',
+  ]);
+  assert.deepEqual(cleanSheet.validation.needsReviewRows, []);
+  assert.deepEqual(cleanSheet.validation.duplicates, []);
+  assert.equal(cleanSheet.validation.needsReviewCount, 0);
+  assert.equal(cleanSheet.validation.duplicateCount, 0);
+
+  const vatIssue = {
+    difference: 1.5,
+    expectedGross: 12,
+    field: "gross",
+    message: "net plus VAT does not equal gross.",
+    type: "vat-mismatch",
+  };
+  const reviewSheet = buildReceiptSheet([
+    {
+      fields: {
+        category: "Meals",
+        date: "2026-07-03",
+        gross: 13.5,
+        net: 10,
+        vat: 2,
+        vendor: "Mismatch Cafe",
+      },
+      validation: {
+        issues: [vatIssue],
+        needsReview: true,
+      },
+    },
+  ]);
+
+  assert.equal(reviewSheet.validation.needsReviewCount, 1);
+  assert.deepEqual(reviewSheet.validation.needsReviewRows, [
+    {
+      index: 0,
+      issues: [vatIssue],
+      reasons: ["net plus VAT does not equal gross."],
+      rowNumber: 1,
+    },
+  ]);
+  assert.deepEqual(reviewSheet.validation.duplicates, []);
+
+  const duplicateSheet = buildReceiptSheet([
+    {
+      fields: {
+        category: "Meals",
+        date: "2026-07-04",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Duplicate Cafe",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      fields: {
+        category: "Meals",
+        date: "2026-07-04",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Duplicate Cafe",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      fields: {
+        category: "Travel",
+        date: "2026-07-04",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Different Vendor",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ]);
+
+  assert.equal(duplicateSheet.validation.duplicateCount, 1);
+  assert.deepEqual(duplicateSheet.validation.duplicates, [
+    {
+      date: "2026-07-04",
+      gross: "12",
+      key: "duplicate cafe|2026-07-04|12",
+      rows: [
+        { index: 0, rowNumber: 1 },
+        { index: 1, rowNumber: 2 },
+      ],
+      vendor: "Duplicate Cafe",
+    },
+  ]);
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
   await verifySupabasePasswordGrant();
   await verifyReceiptCaptureModule();
   await verifyReceiptExtractionModule();
+  verifyBuildSpreadsheetModule();
   console.log("Acceptance checks passed.");
 }
 
