@@ -16,10 +16,75 @@ import {
   getSupabaseConfig,
   signInWithPassword,
 } from "./src/lib/supabaseAuth";
+import { buildReceiptSheet } from "./src/lib/buildSpreadsheet";
+import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
 import {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } from "./src/lib/receiptCapture";
+
+const REQUIRED_RECEIPT_FIELDS = [
+  "vendor",
+  "date",
+  "net",
+  "vat",
+  "gross",
+  "category",
+];
+
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function getReceiptField(receipt, field) {
+  if (hasValue(receipt?.fields?.[field])) {
+    return receipt.fields[field];
+  }
+
+  if (field === "vendor") {
+    return receipt?.fileName || "Selected receipt";
+  }
+
+  if (field === "category") {
+    return receipt?.source || "Receipt";
+  }
+
+  return null;
+}
+
+function buildMissingFieldIssues(fields) {
+  return REQUIRED_RECEIPT_FIELDS
+    .filter((field) => !hasValue(fields[field]))
+    .map((field) => ({
+      field,
+      message: `${field} is missing.`,
+      type: "missing-field",
+    }));
+}
+
+function buildReviewedReceipt(receipt) {
+  const fields = REQUIRED_RECEIPT_FIELDS.reduce(
+    (nextFields, field) => ({
+      ...nextFields,
+      [field]: getReceiptField(receipt, field),
+    }),
+    {},
+  );
+  const existingIssues = Array.isArray(receipt?.validation?.issues)
+    ? receipt.validation.issues
+    : [];
+  const missingIssues = buildMissingFieldIssues(fields);
+  const issues = existingIssues.length > 0 ? existingIssues : missingIssues;
+
+  return {
+    fields,
+    validation: {
+      issues,
+      needsReview:
+        Boolean(receipt?.validation?.needsReview) || issues.length > 0,
+    },
+  };
+}
 
 export default function App() {
   const config = useMemo(() => getSupabaseConfig(), []);
@@ -152,8 +217,23 @@ function SignInScreen({
 function CaptureScreen({ email }) {
   const [captureError, setCaptureError] = useState(null);
   const [confirmedReceipt, setConfirmedReceipt] = useState(false);
+  const [exportError, setExportError] = useState(null);
+  const [exportResult, setExportResult] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [selectingSource, setSelectingSource] = useState(null);
+  const reviewedReceipts = useMemo(
+    () => (confirmedReceipt && receipt ? [buildReviewedReceipt(receipt)] : []),
+    [confirmedReceipt, receipt],
+  );
+  const receiptSheet = useMemo(
+    () => buildReceiptSheet(reviewedReceipts),
+    [reviewedReceipts],
+  );
+  const receiptSummary = {
+    needsReviewCount: receiptSheet.validation.needsReviewCount,
+    rowCount: reviewedReceipts.length,
+  };
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {
@@ -162,6 +242,8 @@ function CaptureScreen({ email }) {
 
     setCaptureError(null);
     setConfirmedReceipt(false);
+    setExportError(null);
+    setExportResult(null);
     setSelectingSource(source);
 
     try {
@@ -189,7 +271,35 @@ function CaptureScreen({ email }) {
   function handleRetakeOrChange() {
     setCaptureError(null);
     setConfirmedReceipt(false);
+    setExportError(null);
+    setExportResult(null);
     setReceipt(null);
+  }
+
+  function handleUseReceipt() {
+    setCaptureError(null);
+    setExportError(null);
+    setExportResult(null);
+    setConfirmedReceipt(true);
+  }
+
+  async function handleExportShare() {
+    if (isExporting || reviewedReceipts.length === 0) {
+      return;
+    }
+
+    setExportError(null);
+    setExportResult(null);
+    setIsExporting(true);
+
+    try {
+      const result = await exportReviewedReceipts(reviewedReceipts);
+      setExportResult(result.exportResult);
+    } catch (error) {
+      setExportError("Unable to export reviewed receipts.");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -200,7 +310,38 @@ function CaptureScreen({ email }) {
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Receipt pack</Text>
           <Text style={styles.panelValue}>Ready</Text>
+          <Text style={styles.panelMeta}>Rows: {receiptSummary.rowCount}</Text>
+          <Text style={styles.panelMeta}>
+            Needs review: {receiptSummary.needsReviewCount}
+          </Text>
           {email ? <Text style={styles.panelMeta}>Signed in as {email}</Text> : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: isExporting || receiptSummary.rowCount === 0,
+            }}
+            disabled={isExporting || receiptSummary.rowCount === 0}
+            onPress={handleExportShare}
+            style={({ pressed }) => [
+              styles.button,
+              isExporting || receiptSummary.rowCount === 0
+                ? styles.buttonDisabled
+                : null,
+              pressed && !isExporting && receiptSummary.rowCount > 0
+                ? styles.buttonPressed
+                : null,
+            ]}
+          >
+            {isExporting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>Export/Share</Text>
+            )}
+          </Pressable>
+          {exportResult?.uri ? (
+            <Text style={styles.panelMeta}>Exported: {exportResult.uri}</Text>
+          ) : null}
+          {exportError ? <Text style={styles.error}>{exportError}</Text> : null}
         </View>
 
         {receipt ? (
@@ -218,7 +359,7 @@ function CaptureScreen({ email }) {
             <View style={styles.actionRow}>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setConfirmedReceipt(true)}
+                onPress={handleUseReceipt}
                 style={({ pressed }) => [
                   styles.button,
                   styles.actionButton,

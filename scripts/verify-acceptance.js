@@ -11,6 +11,9 @@ const {
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
+const {
+  exportReviewedReceipts,
+} = require("../src/lib/exportReviewedReceipts");
 const { exportSheet } = require("../src/lib/exportShare");
 const { extractReceipt } = require("../src/lib/extractReceipt");
 const { applyCorrection } = require("../src/lib/reviewQueue");
@@ -88,6 +91,12 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Use this receipt/);
   assert.match(appSource, /Retake or change/);
   assert.match(appSource, /<Image/);
+  assert.match(appSource, /buildReceiptSheet/);
+  assert.match(appSource, /exportReviewedReceipts/);
+  assert.match(appSource, /Rows:/);
+  assert.match(appSource, /Needs review:/);
+  assert.match(appSource, /Export\/Share/);
+  assert.match(appSource, /onPress={handleExportShare}/);
   assert.ok(fs.existsSync("app"));
   assert.ok(fs.existsSync("src/lib/receiptCapture.js"));
 
@@ -546,6 +555,96 @@ async function verifyExportShareModule() {
   assert.equal(/[\\/]/.test(traversalFileName), false);
 }
 
+async function verifyExportReviewedReceiptsHelper() {
+  const vatIssue = {
+    difference: 1.5,
+    expectedGross: 12,
+    field: "gross",
+    message: "net plus VAT does not equal gross.",
+    type: "vat-mismatch",
+  };
+  const receipts = [
+    {
+      fields: {
+        category: "Office",
+        date: "2026-07-07",
+        gross: 24,
+        net: 20,
+        vat: 4,
+        vendor: "Reviewed Market",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      fields: {
+        category: "Meals",
+        date: "2026-07-08",
+        gross: 13.5,
+        net: 10,
+        vat: 2,
+        vendor: "Review Cafe",
+      },
+      validation: {
+        issues: [vatIssue],
+        needsReview: true,
+      },
+    },
+  ];
+  const expectedCsv = [
+    "vendor,date,net,vat,gross,category",
+    "Reviewed Market,2026-07-07,20,4,24,Office",
+    "Review Cafe,2026-07-08,10,2,13.5,Meals",
+  ].join("\n");
+  const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
+  const writes = [];
+  const shares = [];
+  const result = await exportReviewedReceipts(receipts, {
+    filename: "reviewed-pack",
+    async share(uri) {
+      shares.push(uri);
+    },
+    async writeFile(uri, contents) {
+      writes.push({ contents, uri });
+    },
+  });
+
+  assert.deepEqual(writes, [{ contents: expectedCsv, uri: expectedUri }]);
+  assert.deepEqual(shares, [expectedUri]);
+  assert.equal(result.sheet.csv, expectedCsv);
+  assert.equal(result.sheet.validation.needsReviewCount, 1);
+  assert.deepEqual(result.summary, {
+    needsReviewCount: 1,
+    rowCount: 2,
+  });
+  assert.deepEqual(result.exportResult, { shared: true, uri: expectedUri });
+
+  const exportCalls = [];
+  const injectedResult = await exportReviewedReceipts(receipts, {
+    directory: "file:///tmp/custom/",
+    async exportSheet(payload, dependencies) {
+      exportCalls.push({ dependencies, payload });
+      return { shared: true, uri: "file:///tmp/custom/fake.csv" };
+    },
+    filename: "custom-reviewed",
+    async share() {},
+    async writeFile() {},
+  });
+
+  assert.equal(exportCalls.length, 1);
+  assert.deepEqual(exportCalls[0].payload, {
+    csv: expectedCsv,
+    filename: "custom-reviewed",
+  });
+  assert.equal(exportCalls[0].dependencies.directory, "file:///tmp/custom/");
+  assert.equal(typeof exportCalls[0].dependencies.share, "function");
+  assert.equal(typeof exportCalls[0].dependencies.writeFile, "function");
+  assert.equal(injectedResult.summary.rowCount, 2);
+  assert.equal(injectedResult.exportResult.uri, "file:///tmp/custom/fake.csv");
+}
+
 function createReviewRow(overrides = {}) {
   const fields = {
     category: "Meals",
@@ -713,6 +812,7 @@ async function main() {
   await verifyReceiptExtractionModule();
   verifyBuildSpreadsheetModule();
   await verifyExportShareModule();
+  await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();
   await verifyReceiptPipelineModule();
   console.log("Acceptance checks passed.");
