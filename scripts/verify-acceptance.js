@@ -19,7 +19,15 @@ const {
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
 const { exportSheet } = require("../src/lib/exportShare");
-const { extractReceipt } = require("../src/lib/extractReceipt");
+const {
+  extractReceipt,
+  getDefaultClient,
+} = require("../src/lib/extractReceipt");
+const {
+  ANTHROPIC_MESSAGES_URL,
+  ANTHROPIC_VERSION,
+  createClaudeVisionClient,
+} = require("../src/lib/claudeVisionClient");
 const { applyCorrection } = require("../src/lib/reviewQueue");
 const { processReceipts } = require("../src/lib/receiptPipeline");
 
@@ -275,6 +283,227 @@ async function withNetworkBlocked(run) {
   } finally {
     global.fetch = originalFetch;
   }
+}
+
+function createAnthropicMessage(text) {
+  return {
+    content: [{ text, type: "text" }],
+  };
+}
+
+function createAnthropicSuccessResponse(text) {
+  return {
+    ok: true,
+    async json() {
+      return createAnthropicMessage(text);
+    },
+  };
+}
+
+function createReceiptJson(vendor = "Vision Market") {
+  return JSON.stringify({
+    confidences: {
+      category: 0.91,
+      date: 0.97,
+      gross: 0.98,
+      net: 0.96,
+      vat: 0.95,
+      vendor: 0.99,
+    },
+    fields: {
+      category: "Office",
+      date: "2026-07-09",
+      gross: "24.00",
+      net: "20.00",
+      vat: "4.00",
+      vendor,
+    },
+  });
+}
+
+async function verifyClaudeVisionClient() {
+  await withNetworkBlocked(async () => {
+    const image = {
+      mimeType: "image/png",
+      uri: "file://vision-receipt.png",
+    };
+    const readUris = [];
+    const fetchCalls = [];
+    const client = createClaudeVisionClient({
+      apiKey: "anthropic-key",
+      async fetchImpl(url, options) {
+        fetchCalls.push({ options, url });
+        return createAnthropicSuccessResponse(
+          `Here is the extraction:\n\`\`\`json\n${createReceiptJson()}\n\`\`\``,
+        );
+      },
+      model: "receipt-model",
+      async readImageBase64(uri) {
+        readUris.push(uri);
+        return "base64-receipt-image";
+      },
+    });
+
+    const result = await client.extractReceipt(image);
+
+    assert.deepEqual(readUris, [image.uri]);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, ANTHROPIC_MESSAGES_URL);
+    assert.equal(fetchCalls[0].options.method, "POST");
+    assert.equal(fetchCalls[0].options.headers["x-api-key"], "anthropic-key");
+    assert.equal(
+      fetchCalls[0].options.headers["anthropic-version"],
+      ANTHROPIC_VERSION,
+    );
+    assert.equal(fetchCalls[0].options.headers["Content-Type"], "application/json");
+
+    const body = JSON.parse(fetchCalls[0].options.body);
+    const content = body.messages[0].content;
+    const imageBlock = content[0];
+    const promptBlock = content[1];
+
+    assert.equal(body.model, "receipt-model");
+    assert.equal(body.messages[0].role, "user");
+    assert.equal(imageBlock.type, "image");
+    assert.deepEqual(imageBlock.source, {
+      data: "base64-receipt-image",
+      media_type: "image/png",
+      type: "base64",
+    });
+    assert.equal(promptBlock.type, "text");
+    assert.match(promptBlock.text, /STRICT JSON/);
+    assert.match(promptBlock.text, /confidence/i);
+
+    for (const field of ["vendor", "date", "net", "vat", "gross", "category"]) {
+      assert.match(promptBlock.text, new RegExp(field));
+    }
+
+    assert.deepEqual(result, {
+      confidences: {
+        category: 0.91,
+        date: 0.97,
+        gross: 0.98,
+        net: 0.96,
+        vat: 0.95,
+        vendor: 0.99,
+      },
+      fields: {
+        category: "Office",
+        date: "2026-07-09",
+        gross: "24.00",
+        net: "20.00",
+        vat: "4.00",
+        vendor: "Vision Market",
+      },
+    });
+
+    const nonOkClient = createClaudeVisionClient({
+      apiKey: "anthropic-key",
+      async fetchImpl() {
+        return { ok: false, status: 429 };
+      },
+      model: "receipt-model",
+      async readImageBase64() {
+        return "base64-receipt-image";
+      },
+    });
+
+    await assert.rejects(
+      () => nonOkClient.extractReceipt(image),
+      /Receipt extraction API request failed \(429\)\./,
+    );
+
+    const unparseableClient = createClaudeVisionClient({
+      apiKey: "anthropic-key",
+      async fetchImpl() {
+        return createAnthropicSuccessResponse("```json\n{not valid json}\n```");
+      },
+      model: "receipt-model",
+      async readImageBase64() {
+        return "base64-receipt-image";
+      },
+    });
+
+    await assert.rejects(
+      () => unparseableClient.extractReceipt(image),
+      /Receipt extraction response contained unparseable JSON\./,
+    );
+  });
+}
+
+async function verifyDefaultReceiptClientSelection() {
+  await withNetworkBlocked(async () => {
+    const image = {
+      mimeType: "image/jpeg",
+      uri: "file://default-client.jpg",
+    };
+    const claudeCalls = [];
+    const claudeClient = getDefaultClient({
+      env: {
+        ANTHROPIC_API_KEY: "anthropic-key",
+        ANTHROPIC_MODEL: "receipt-model",
+      },
+      async fetchImpl(url, options) {
+        claudeCalls.push({ options, url });
+        return createAnthropicSuccessResponse(createReceiptJson("Default Market"));
+      },
+      async readImageBase64(uri) {
+        assert.equal(uri, image.uri);
+        return "base64-default-image";
+      },
+    });
+
+    const claudeResult = await claudeClient.extractReceipt(image);
+
+    assert.equal(claudeResult.fields.vendor, "Default Market");
+    assert.equal(claudeCalls.length, 1);
+    assert.equal(claudeCalls[0].url, ANTHROPIC_MESSAGES_URL);
+    assert.equal(
+      JSON.parse(claudeCalls[0].options.body).messages[0].content[0].source.data,
+      "base64-default-image",
+    );
+
+    const endpointCalls = [];
+    const endpointClient = getDefaultClient({
+      env: {
+        STRUCTLY_RECEIPT_EXTRACT_API_KEY: "endpoint-key",
+        STRUCTLY_RECEIPT_EXTRACT_ENDPOINT: "https://extract.example.test/receipt",
+      },
+      async fetchImpl(url, options) {
+        endpointCalls.push({ options, url });
+
+        return {
+          ok: true,
+          async json() {
+            return {
+              fields: {
+                category: "Travel",
+                date: "2026-07-10",
+                gross: "12.00",
+                net: "10.00",
+                vat: "2.00",
+                vendor: "Endpoint Market",
+              },
+            };
+          },
+        };
+      },
+    });
+
+    const endpointResult = await endpointClient.extractReceipt(image);
+
+    assert.equal(endpointResult.fields.vendor, "Endpoint Market");
+    assert.equal(endpointCalls.length, 1);
+    assert.equal(
+      endpointCalls[0].url,
+      "https://extract.example.test/receipt",
+    );
+    assert.equal(
+      endpointCalls[0].options.headers.Authorization,
+      "Bearer endpoint-key",
+    );
+    assert.deepEqual(JSON.parse(endpointCalls[0].options.body), { image });
+  });
 }
 
 async function verifyReceiptExtractionModule() {
@@ -934,6 +1163,8 @@ async function main() {
   verifyMissingConfigDoesNotCrash();
   await verifySupabasePasswordGrant();
   await verifyReceiptCaptureModule();
+  await verifyClaudeVisionClient();
+  await verifyDefaultReceiptClientSelection();
   await verifyReceiptExtractionModule();
   await verifyConfirmReceiptExtractionHelper();
   verifyBuildSpreadsheetModule();
