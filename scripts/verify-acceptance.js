@@ -12,6 +12,10 @@ const {
 } = require("../src/lib/receiptCapture");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
 const {
+  RECEIPT_FIELD_ROWS,
+  confirmReceiptExtraction,
+} = require("../src/lib/confirmReceiptExtraction");
+const {
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
 const { exportSheet } = require("../src/lib/exportShare");
@@ -92,6 +96,12 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Retake or change/);
   assert.match(appSource, /<Image/);
   assert.match(appSource, /buildReceiptSheet/);
+  assert.match(appSource, /confirmReceiptExtraction/);
+  assert.match(appSource, /confirmReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/);
+  assert.match(appSource, /RECEIPT_FIELD_ROWS\.map/);
+  assert.match(appSource, /fieldRow\.label/);
+  assert.match(appSource, /fieldRow\.displayValue/);
+  assert.match(appSource, /Extracting receipt fields/);
   assert.match(appSource, /exportReviewedReceipts/);
   assert.ok(
     appSource.includes('import { applyCorrection } from "./src/lib/reviewQueue";'),
@@ -350,6 +360,110 @@ async function verifyReceiptExtractionModule() {
     assert.equal(hasIssue(missingResult, "missing-field", "vendor"), true);
     assert.equal(hasIssue(missingResult, "missing-field", "date"), true);
     assert.equal(hasIssue(missingResult, "low-confidence", "category"), true);
+  });
+}
+
+async function verifyConfirmReceiptExtractionHelper() {
+  await withNetworkBlocked(async () => {
+    const cleanImage = {
+      mimeType: "image/jpeg",
+      uri: "file://confirm-clean.jpg",
+    };
+    const cleanCalls = [];
+    const cleanResult = await confirmReceiptExtraction(cleanImage, {
+      vision: {
+        async extractReceipt(image) {
+          cleanCalls.push(image);
+
+          return {
+            fields: {
+              category: { confidence: 0.95, value: "Office" },
+              date: { confidence: 0.96, value: "2026-07-07" },
+              gross: { confidence: 0.98, value: "24.00" },
+              net: { confidence: 0.98, value: "20.00" },
+              vat: { confidence: 0.98, value: "4.00" },
+              vendor: { confidence: 0.99, value: "Clean Market" },
+            },
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(cleanCalls, [cleanImage]);
+    assert.deepEqual(
+      RECEIPT_FIELD_ROWS.map((row) => row.label),
+      ["Vendor", "Date", "Net", "VAT", "Gross", "Category"],
+    );
+    assert.deepEqual(cleanResult.receipt.fields, {
+      category: "Office",
+      date: "2026-07-07",
+      gross: 24,
+      net: 20,
+      vat: 4,
+      vendor: "Clean Market",
+    });
+    assert.deepEqual(
+      cleanResult.fieldRows.map(({ displayValue, field, label }) => ({
+        displayValue,
+        field,
+        label,
+      })),
+      [
+        { displayValue: "Clean Market", field: "vendor", label: "Vendor" },
+        { displayValue: "2026-07-07", field: "date", label: "Date" },
+        { displayValue: "20", field: "net", label: "Net" },
+        { displayValue: "4", field: "vat", label: "VAT" },
+        { displayValue: "24", field: "gross", label: "Gross" },
+        { displayValue: "Office", field: "category", label: "Category" },
+      ],
+    );
+    assert.equal(cleanResult.needsReview, false);
+    assert.equal(cleanResult.sheet.validation.needsReviewCount, 0);
+
+    const flaggedImage = {
+      mimeType: "image/jpeg",
+      uri: "file://confirm-flagged.jpg",
+    };
+    const flaggedCalls = [];
+    const flaggedResult = await confirmReceiptExtraction(flaggedImage, {
+      vision: {
+        async extractReceipt(image) {
+          flaggedCalls.push(image);
+
+          return {
+            fields: {
+              category: { confidence: 0.5, value: "Meals" },
+              date: { confidence: 0.95, value: "2026-07-08" },
+              gross: { confidence: 0.95, value: "13.50" },
+              net: { confidence: 0.95, value: "10.00" },
+              vat: { confidence: 0.95, value: "2.00" },
+              vendor: { confidence: 0.95, value: "Review Cafe" },
+            },
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(flaggedCalls, [flaggedImage]);
+    assert.deepEqual(flaggedResult.receipt.fields, {
+      category: "Meals",
+      date: "2026-07-08",
+      gross: 13.5,
+      net: 10,
+      vat: 2,
+      vendor: "Review Cafe",
+    });
+    assert.equal(flaggedResult.needsReview, true);
+    assert.equal(flaggedResult.sheet.validation.needsReviewCount, 1);
+    assert.equal(hasIssue(flaggedResult.receipt, "vat-mismatch", "gross"), true);
+    assert.equal(
+      hasIssue(flaggedResult.receipt, "low-confidence", "category"),
+      true,
+    );
+    assert.equal(
+      flaggedResult.fieldRows.find((row) => row.field === "vendor").displayValue,
+      "Review Cafe",
+    );
   });
 }
 
@@ -821,6 +935,7 @@ async function main() {
   await verifySupabasePasswordGrant();
   await verifyReceiptCaptureModule();
   await verifyReceiptExtractionModule();
+  await verifyConfirmReceiptExtractionHelper();
   verifyBuildSpreadsheetModule();
   await verifyExportShareModule();
   await verifyExportReviewedReceiptsHelper();
