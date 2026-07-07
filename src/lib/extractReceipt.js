@@ -2,6 +2,7 @@ const AMOUNT_FIELDS = ["net", "vat", "gross"];
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const REQUIRED_FIELDS = ["vendor", "date", "net", "vat", "gross", "category"];
 const VAT_TOLERANCE = 0.01;
+const { createClaudeVisionClient } = require("./claudeVisionClient");
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -11,31 +12,52 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-function getDefaultClient() {
+function getFetch(fetchImpl) {
+  if (typeof fetchImpl === "function") {
+    return fetchImpl;
+  }
+
+  if (typeof fetch === "function") {
+    return fetch;
+  }
+
+  throw new Error("Receipt extraction requires fetch support.");
+}
+
+function getDefaultClient({
+  env = process.env,
+  fetchImpl,
+  readImageBase64,
+} = {}) {
+  if (env.ANTHROPIC_API_KEY) {
+    return createClaudeVisionClient({
+      apiKey: env.ANTHROPIC_API_KEY,
+      fetchImpl,
+      model: env.ANTHROPIC_MODEL || env.EXPO_PUBLIC_ANTHROPIC_MODEL,
+      readImageBase64,
+    });
+  }
+
   return {
     async extractReceipt(image) {
       const endpoint =
-        process.env.STRUCTLY_RECEIPT_EXTRACT_ENDPOINT ||
-        process.env.EXPO_PUBLIC_RECEIPT_EXTRACT_ENDPOINT;
+        env.STRUCTLY_RECEIPT_EXTRACT_ENDPOINT ||
+        env.EXPO_PUBLIC_RECEIPT_EXTRACT_ENDPOINT;
 
       if (!endpoint) {
         throw new Error("Receipt extraction endpoint is not configured.");
       }
 
-      if (typeof fetch !== "function") {
-        throw new Error("Receipt extraction requires fetch support.");
-      }
-
       const headers = {
         "Content-Type": "application/json",
       };
-      const apiKey = process.env.STRUCTLY_RECEIPT_EXTRACT_API_KEY;
+      const apiKey = env.STRUCTLY_RECEIPT_EXTRACT_API_KEY;
 
       if (apiKey) {
         headers.Authorization = `Bearer ${apiKey}`;
       }
 
-      const response = await fetch(endpoint, {
+      const response = await getFetch(fetchImpl)(endpoint, {
         body: JSON.stringify({ image }),
         headers,
         method: "POST",
@@ -227,4 +249,5 @@ module.exports = {
   LOW_CONFIDENCE_THRESHOLD,
   VAT_TOLERANCE,
   extractReceipt,
+  getDefaultClient,
 };
