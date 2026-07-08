@@ -176,6 +176,8 @@ function verifyMissingConfigDoesNotCrash() {
 
 async function verifyReceiptCaptureModule() {
   const calls = [];
+  const cameraCapturedAt = "2026-07-08T10:30:00.000Z";
+  const libraryCreationTime = "2026-07-07T14:20:00.000Z";
   const imagePicker = {
     MediaTypeOptions: { Images: "Images" },
     async launchCameraAsync(options) {
@@ -203,6 +205,7 @@ async function verifyReceiptCaptureModule() {
             fileName: "receipt-library.png",
             height: 1600,
             mimeType: "image/png",
+            creationTime: libraryCreationTime,
             uri: "file://receipt-library.png",
             width: 1200,
           },
@@ -220,9 +223,13 @@ async function verifyReceiptCaptureModule() {
     },
   };
 
-  const cameraResult = await takeReceiptPhoto({ imagePicker });
+  const cameraResult = await takeReceiptPhoto({
+    imagePicker,
+    now: () => cameraCapturedAt,
+  });
   assert.equal(cameraResult.error, null);
   assert.equal(cameraResult.status, "selected");
+  assert.equal(cameraResult.receipt.capturedAt, cameraCapturedAt);
   assert.equal(cameraResult.receipt.source, "camera");
   assert.equal(cameraResult.receipt.uri, "file://receipt-camera.jpg");
   assert.equal(calls[0][0], "requestCamera");
@@ -233,12 +240,43 @@ async function verifyReceiptCaptureModule() {
   const libraryResult = await pickReceiptFromLibrary({ imagePicker });
   assert.equal(libraryResult.error, null);
   assert.equal(libraryResult.status, "selected");
+  assert.equal(libraryResult.receipt.capturedAt, libraryCreationTime);
   assert.equal(libraryResult.receipt.source, "library");
   assert.equal(libraryResult.receipt.uri, "file://receipt-library.png");
   assert.deepEqual(calls[2], ["requestLibrary", false]);
   assert.equal(calls[3][0], "launchLibrary");
   assert.equal(calls[3][1].mediaTypes, "Images");
   assert.equal(calls[3][1].quality, 0.9);
+
+  const libraryWithoutCreationTimeResult = await pickReceiptFromLibrary({
+    imagePicker: {
+      MediaTypeOptions: { Images: "Images" },
+      async launchImageLibraryAsync() {
+        return {
+          assets: [
+            {
+              fileName: "receipt-library-no-created-at.png",
+              height: 900,
+              mimeType: "image/png",
+              uri: "file://receipt-library-no-created-at.png",
+              width: 700,
+            },
+          ],
+          canceled: false,
+        };
+      },
+      async requestMediaLibraryPermissionsAsync() {
+        return { granted: true };
+      },
+    },
+  });
+  assert.equal(libraryWithoutCreationTimeResult.error, null);
+  assert.equal(libraryWithoutCreationTimeResult.status, "selected");
+  assert.equal(libraryWithoutCreationTimeResult.receipt.capturedAt, null);
+  assert.equal(
+    libraryWithoutCreationTimeResult.receipt.uri,
+    "file://receipt-library-no-created-at.png",
+  );
 
   const cancelledResult = await pickReceiptFromLibrary({
     imagePicker: {

@@ -17,12 +17,13 @@ function getImageOptions(imagePicker) {
   };
 }
 
-function normalizeReceipt(asset, source) {
+function normalizeReceipt(asset, source, capturedAt) {
   if (!asset?.uri) {
     return null;
   }
 
   return {
+    capturedAt,
     fileName: asset.fileName || null,
     height: asset.height || null,
     mimeType: asset.mimeType || asset.type || null,
@@ -32,12 +33,17 @@ function normalizeReceipt(asset, source) {
   };
 }
 
-function normalizePickerResult(result, source) {
+function normalizePickerResult(result, source, getCapturedAt = () => null) {
   if (result?.canceled || result?.cancelled) {
     return { error: null, receipt: null, status: "cancelled" };
   }
 
-  const receipt = normalizeReceipt(result?.assets?.[0], source);
+  const asset = result?.assets?.[0];
+  const receipt = normalizeReceipt(
+    asset,
+    source,
+    asset?.uri ? getCapturedAt(asset) : null,
+  );
 
   if (!receipt) {
     return {
@@ -50,7 +56,10 @@ function normalizePickerResult(result, source) {
   return { error: null, receipt, status: "selected" };
 }
 
-async function takeReceiptPhoto({ imagePicker = getDefaultImagePicker() } = {}) {
+async function takeReceiptPhoto({
+  imagePicker = getDefaultImagePicker(),
+  now = () => new Date().toISOString(),
+} = {}) {
   const permission = await imagePicker.requestCameraPermissionsAsync();
 
   if (!hasPermission(permission)) {
@@ -62,7 +71,7 @@ async function takeReceiptPhoto({ imagePicker = getDefaultImagePicker() } = {}) 
   }
 
   const result = await imagePicker.launchCameraAsync(getImageOptions(imagePicker));
-  return normalizePickerResult(result, "camera");
+  return normalizePickerResult(result, "camera", () => now());
 }
 
 async function pickReceiptFromLibrary({ imagePicker = getDefaultImagePicker() } = {}) {
@@ -77,7 +86,11 @@ async function pickReceiptFromLibrary({ imagePicker = getDefaultImagePicker() } 
   }
 
   const result = await imagePicker.launchImageLibraryAsync(getImageOptions(imagePicker));
-  return normalizePickerResult(result, "library");
+  return normalizePickerResult(
+    result,
+    "library",
+    (asset) => asset.creationTime ?? null,
+  );
 }
 
 module.exports = {
