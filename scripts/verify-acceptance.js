@@ -36,6 +36,10 @@ const {
   findEventForReceipt,
   getReceiptCalendarContext,
 } = require("../src/lib/calendarContext");
+const {
+  attachLocation,
+  getReceiptLocation,
+} = require("../src/lib/locationContext");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -1164,6 +1168,147 @@ async function verifyReceiptPipelineModule() {
   });
 }
 
+async function verifyLocationContextModule() {
+  await withNetworkBlocked(async () => {
+    const grantedCalls = [];
+    const grantedContext = await getReceiptLocation({
+      location: {
+        async getCurrentPositionAsync(options) {
+          grantedCalls.push(["getCurrentPosition", options]);
+
+          return {
+            coords: {
+              latitude: 51.5074,
+              longitude: -0.1278,
+            },
+          };
+        },
+        async requestForegroundPermissionsAsync() {
+          grantedCalls.push(["requestForegroundPermissions"]);
+          return { status: "granted" };
+        },
+        async reverseGeocodeAsync(coords) {
+          grantedCalls.push(["reverseGeocode", coords]);
+
+          return [
+            {
+              city: "London",
+              country: "United Kingdom",
+              name: "Soho Market",
+              region: "England",
+            },
+          ];
+        },
+      },
+    });
+
+    assert.deepEqual(grantedCalls, [
+      ["requestForegroundPermissions"],
+      ["getCurrentPosition", {}],
+      ["reverseGeocode", { latitude: 51.5074, longitude: -0.1278 }],
+    ]);
+    assert.deepEqual(grantedContext, {
+      latitude: 51.5074,
+      longitude: -0.1278,
+      placeName: "Soho Market",
+      city: "London",
+      region: "England",
+      country: "United Kingdom",
+    });
+
+    let requestedPositionAfterDenied = false;
+    let reverseGeocodedAfterDenied = false;
+    const deniedContext = await getReceiptLocation({
+      location: {
+        async getCurrentPositionAsync() {
+          requestedPositionAfterDenied = true;
+          return { coords: { latitude: 51.5074, longitude: -0.1278 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          return { granted: false, status: "denied" };
+        },
+        async reverseGeocodeAsync() {
+          reverseGeocodedAfterDenied = true;
+          return [];
+        },
+      },
+    });
+
+    assert.equal(deniedContext, null);
+    assert.equal(requestedPositionAfterDenied, false);
+    assert.equal(reverseGeocodedAfterDenied, false);
+
+    const unavailableContext = await getReceiptLocation({
+      location: {
+        async requestForegroundPermissionsAsync() {
+          return { granted: true };
+        },
+      },
+    });
+    assert.equal(unavailableContext, null);
+
+    const errorContext = await getReceiptLocation({
+      location: {
+        async getCurrentPositionAsync() {
+          throw new Error("Location unavailable.");
+        },
+        async requestForegroundPermissionsAsync() {
+          return { status: "granted" };
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+    assert.equal(errorContext, null);
+
+    const partialContext = await getReceiptLocation({
+      location: {
+        async getCurrentPositionAsync() {
+          return {
+            coords: {
+              latitude: 40.7128,
+              longitude: -74.006,
+            },
+          };
+        },
+        async requestForegroundPermissionsAsync() {
+          return { granted: true };
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+    assert.deepEqual(partialContext, {
+      latitude: 40.7128,
+      longitude: -74.006,
+      placeName: null,
+      city: null,
+      region: null,
+      country: null,
+    });
+
+    const receipt = {
+      context: { source: "camera" },
+      fields: { gross: 24, vendor: "Soho Market" },
+    };
+    const originalSnapshot = JSON.parse(JSON.stringify(receipt));
+    const attachedReceipt = attachLocation(receipt, grantedContext);
+
+    assert.notEqual(attachedReceipt, receipt);
+    assert.notEqual(attachedReceipt.context, receipt.context);
+    assert.deepEqual(receipt, originalSnapshot);
+    assert.deepEqual(attachedReceipt, {
+      context: {
+        location: grantedContext,
+        source: "camera",
+      },
+      fields: { gross: 24, vendor: "Soho Market" },
+    });
+  });
+}
+
 async function verifyCalendarContextModule() {
   const capturedAt = "2026-07-08T10:30:00+01:00";
   const overlappingEvent = {
@@ -1355,6 +1500,7 @@ async function main() {
   await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();
   await verifyReceiptPipelineModule();
+  await verifyLocationContextModule();
   await verifyCalendarContextModule();
   console.log("Acceptance checks passed.");
 }
