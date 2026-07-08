@@ -1,4 +1,6 @@
-const COLUMNS = ["vendor", "date", "net", "vat", "gross", "category"];
+const FIELD_COLUMNS = ["vendor", "date", "net", "vat", "gross", "category"];
+const CONTEXT_COLUMNS = ["location", "billable_client"];
+const COLUMNS = [...FIELD_COLUMNS, ...CONTEXT_COLUMNS];
 const HEADER_ROW = COLUMNS.join(",");
 
 function formatCellValue(value) {
@@ -25,6 +27,24 @@ function escapeCsvCell(value) {
 
 function getFields(receipt) {
   return receipt?.fields || {};
+}
+
+function getContext(receipt) {
+  return receipt?.context && typeof receipt.context === "object"
+    ? receipt.context
+    : {};
+}
+
+function getContextFields(receipt) {
+  const context = getContext(receipt);
+  const billable = context.billable;
+  const billableClient =
+    billable?.billable === true ? billable?.client : null;
+
+  return {
+    billable_client: billableClient,
+    location: context.location?.placeName,
+  };
 }
 
 function getIssues(receipt) {
@@ -128,8 +148,12 @@ function buildDuplicates(receipts) {
 function buildCsv(receipts) {
   const rows = receipts.map((receipt) => {
     const fields = getFields(receipt);
+    const contextFields = getContextFields(receipt);
 
-    return COLUMNS.map((field) => escapeCsvCell(fields[field])).join(",");
+    return [
+      ...FIELD_COLUMNS.map((field) => escapeCsvCell(fields[field])),
+      ...CONTEXT_COLUMNS.map((field) => escapeCsvCell(contextFields[field])),
+    ].join(",");
   });
 
   return [HEADER_ROW, ...rows].join("\n");

@@ -33,6 +33,11 @@ const {
   createClaudeVisionClient,
 } = require("../src/lib/claudeVisionClient");
 const { applyCorrection } = require("../src/lib/reviewQueue");
+const {
+  CONTEXT_REVIEW_DECISIONS,
+  applyReceiptContextDecision,
+  getReceiptContextDisplay,
+} = require("../src/lib/receiptContextReview");
 const { processReceipts } = require("../src/lib/receiptPipeline");
 const {
   attachCalendarContext,
@@ -138,6 +143,11 @@ function verifyScaffoldFiles() {
   assert.ok(
     appSource.includes('import { applyCorrection } from "./src/lib/reviewQueue";'),
   );
+  assert.ok(
+    appSource.includes(
+      'import {\n  CONTEXT_REVIEW_DECISIONS,\n  applyReceiptContextDecision,\n  getReceiptContextDisplay,\n} from "./src/lib/receiptContextReview";',
+    ),
+  );
   assert.match(appSource, /Rows:/);
   assert.match(appSource, /Needs review:/);
   assert.match(appSource, /Review receipt/);
@@ -148,6 +158,19 @@ function verifyScaffoldFiles() {
     /applyCorrection\(currentRows,\s*0,\s*\{\s*\[field\]: value\s*\}\s*\)/,
   );
   assert.match(appSource, /handleReceiptCorrection\(reviewField, value\)/);
+  assert.match(appSource, /getReceiptContextDisplay\(extractedReceipt\)/);
+  assert.match(appSource, /function handleReceiptContextDecision/);
+  assert.match(
+    appSource,
+    /applyReceiptContextDecision\(currentRows,\s*0,\s*decision\)/,
+  );
+  assert.match(appSource, /Receipt context/);
+  assert.match(appSource, /Place/);
+  assert.match(appSource, /Billable client/);
+  assert.match(appSource, /CONTEXT_REVIEW_DECISIONS\.CONFIRM/);
+  assert.match(appSource, /CONTEXT_REVIEW_DECISIONS\.CLEAR/);
+  assert.match(appSource, /Confirm/);
+  assert.match(appSource, /Clear/);
   assert.match(appSource, /Export\/Share/);
   assert.match(appSource, /onPress={handleExportShare}/);
   assert.ok(fs.existsSync("app"));
@@ -775,6 +798,33 @@ function verifyBuildSpreadsheetModule() {
       },
     },
     {
+      context: {
+        billable: {
+          billable: true,
+          client: "Acme Ltd",
+          project: "VAT review",
+        },
+        location: {
+          city: "London",
+          country: "United Kingdom",
+          placeName: "Soho Market",
+          region: "England",
+        },
+      },
+      fields: {
+        category: "Travel",
+        date: "2026-07-03",
+        gross: 18,
+        net: 15,
+        vat: 3,
+        vendor: "Enriched Taxi",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
       fields: {
         category: "Meals, team",
         date: "2026-07-02",
@@ -791,9 +841,10 @@ function verifyBuildSpreadsheetModule() {
   ]);
 
   assert.deepEqual(cleanSheet.csv.split("\n"), [
-    "vendor,date,net,vat,gross,category",
-    "Acme Supplies,2026-07-01,10,2,12,Office",
-    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team"',
+    "vendor,date,net,vat,gross,category,location,billable_client",
+    "Acme Supplies,2026-07-01,10,2,12,Office,,",
+    "Enriched Taxi,2026-07-03,15,3,18,Travel,Soho Market,Acme Ltd",
+    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team",,',
   ]);
   assert.deepEqual(cleanSheet.validation.needsReviewRows, []);
   assert.deepEqual(cleanSheet.validation.duplicates, []);
@@ -1010,9 +1061,9 @@ async function verifyExportReviewedReceiptsHelper() {
     },
   ];
   const expectedCsv = [
-    "vendor,date,net,vat,gross,category",
-    "Reviewed Market,2026-07-07,20,4,24,Office",
-    "Review Cafe,2026-07-08,10,2,13.5,Meals",
+    "vendor,date,net,vat,gross,category,location,billable_client",
+    "Reviewed Market,2026-07-07,20,4,24,Office,,",
+    "Review Cafe,2026-07-08,10,2,13.5,Meals,,",
   ].join("\n");
   const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
   const writes = [];
@@ -1141,6 +1192,130 @@ function verifyReviewQueueCorrections() {
   );
 }
 
+function verifyReceiptContextReviewHelper() {
+  const originalRows = [
+    {
+      context: {
+        billable: {
+          billable: true,
+          client: "Acme Ltd",
+          project: "VAT review",
+        },
+        calendar: {
+          eventId: "event-acme",
+          title: "Acme Ltd - VAT review",
+        },
+        capturedAt: "2026-07-08T10:30:00.000Z",
+        location: {
+          city: "London",
+          country: "United Kingdom",
+          placeName: "Acme Cafe",
+          region: "England",
+        },
+        source: "camera",
+      },
+      fields: {
+        category: "Meals",
+        date: "2026-07-08",
+        gross: 24,
+        net: 20,
+        vat: 4,
+        vendor: "Acme Cafe",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    createReviewRow({ vendor: "Stable Cafe" }),
+  ];
+  const originalSnapshot = JSON.parse(JSON.stringify(originalRows));
+  const display = getReceiptContextDisplay(originalRows[0]);
+
+  assert.deepEqual(display, {
+    billableClient: "Acme Ltd",
+    hasContext: true,
+    location: "Acme Cafe",
+  });
+  assert.deepEqual(getReceiptContextDisplay({}), {
+    billableClient: "",
+    hasContext: false,
+    location: "",
+  });
+  assert.deepEqual(
+    getReceiptContextDisplay({
+      context: {
+        billable: { billable: false, client: "Internal Team" },
+        location: { placeName: "Desk" },
+      },
+    }),
+    {
+      billableClient: "",
+      hasContext: true,
+      location: "Desk",
+    },
+  );
+
+  const confirmedRows = applyReceiptContextDecision(
+    originalRows,
+    0,
+    CONTEXT_REVIEW_DECISIONS.CONFIRM,
+  );
+  assert.equal(confirmedRows, originalRows);
+
+  const clearedRows = applyReceiptContextDecision(
+    originalRows,
+    0,
+    CONTEXT_REVIEW_DECISIONS.CLEAR,
+  );
+
+  assert.notEqual(clearedRows, originalRows);
+  assert.notEqual(clearedRows[0], originalRows[0]);
+  assert.equal(clearedRows[1], originalRows[1]);
+  assert.deepEqual(originalRows, originalSnapshot);
+  assert.equal(clearedRows[0].context.source, "camera");
+  assert.equal(clearedRows[0].context.capturedAt, "2026-07-08T10:30:00.000Z");
+  assert.deepEqual(clearedRows[0].context.calendar, {
+    eventId: "event-acme",
+    title: "Acme Ltd - VAT review",
+  });
+  assert.equal(clearedRows[0].context.location, null);
+  assert.deepEqual(clearedRows[0].context.billable, {
+    billable: false,
+    client: null,
+    project: null,
+  });
+  assert.deepEqual(getReceiptContextDisplay(clearedRows[0]), {
+    billableClient: "",
+    hasContext: false,
+    location: "",
+  });
+  assert.deepEqual(buildReceiptSheet(clearedRows).csv.split("\n")[1], [
+    "Acme Cafe",
+    "2026-07-08",
+    "20",
+    "4",
+    "24",
+    "Meals",
+    "",
+    "",
+  ].join(","));
+
+  assert.throws(
+    () => applyReceiptContextDecision(originalRows, 0, "maybe"),
+    /Unsupported receipt context decision: maybe\./,
+  );
+  assert.throws(
+    () =>
+      applyReceiptContextDecision(
+        originalRows,
+        2,
+        CONTEXT_REVIEW_DECISIONS.CLEAR,
+      ),
+    /Receipt context review index 2 is out of range\./,
+  );
+}
+
 async function verifyReceiptPipelineModule() {
   await withNetworkBlocked(async () => {
     const images = [
@@ -1200,9 +1375,9 @@ async function verifyReceiptPipelineModule() {
     assert.deepEqual(result.failures[0].image, images[2]);
     assert.equal(result.failures[0].error.message, "Vision extraction failed.");
     assert.deepEqual(result.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category",
-      "Clean Market,2026-07-05,20,4,24,Office",
-      "Review Cafe,2026-07-06,10,2,13.5,Meals",
+      "vendor,date,net,vat,gross,category,location,billable_client",
+      "Clean Market,2026-07-05,20,4,24,Office,,",
+      "Review Cafe,2026-07-06,10,2,13.5,Meals,,",
     ]);
     assert.equal(result.sheet.validation.needsReviewCount, 1);
     assert.deepEqual(result.sheet.validation.needsReviewRows, [
@@ -1787,8 +1962,8 @@ async function verifyEnrichReceiptModule() {
     assert.equal(pipelineResult.receipts.length, 1);
     assert.equal(pipelineResult.failures.length, 0);
     assert.deepEqual(pipelineResult.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category",
-      "Pipeline Cafe,2026-07-08,20,4,24,Meals",
+      "vendor,date,net,vat,gross,category,location,billable_client",
+      "Pipeline Cafe,2026-07-08,20,4,24,Meals,,",
     ]);
     assert.equal(pipelineResult.sheet.validation.needsReviewCount, 0);
     assert.equal(await pendingEnrichment, pipelineReceipt);
@@ -1808,6 +1983,7 @@ async function main() {
   await verifyExportShareModule();
   await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();
+  verifyReceiptContextReviewHelper();
   await verifyReceiptPipelineModule();
   await verifyLocationContextModule();
   await verifyCalendarContextModule();

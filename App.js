@@ -28,6 +28,11 @@ import {
   takeReceiptPhoto,
 } from "./src/lib/receiptCapture";
 import { applyCorrection } from "./src/lib/reviewQueue";
+import {
+  CONTEXT_REVIEW_DECISIONS,
+  applyReceiptContextDecision,
+  getReceiptContextDisplay,
+} from "./src/lib/receiptContextReview";
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
 
@@ -258,6 +263,9 @@ function CaptureScreen({ email, vision }) {
         label,
       }))
     : [];
+  const receiptContext = extractedReceipt
+    ? getReceiptContextDisplay(extractedReceipt)
+    : null;
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {
@@ -344,6 +352,16 @@ function CaptureScreen({ email, vision }) {
     setReviewedReceipts((currentRows) =>
       currentRows.length > 0
         ? applyCorrection(currentRows, 0, { [field]: value })
+        : currentRows,
+    );
+  }
+
+  function handleReceiptContextDecision(decision) {
+    setExportError(null);
+    setExportResult(null);
+    setReviewedReceipts((currentRows) =>
+      currentRows.length > 0
+        ? applyReceiptContextDecision(currentRows, 0, decision)
         : currentRows,
     );
   }
@@ -439,6 +457,81 @@ function CaptureScreen({ email, vision }) {
                       </Text>
                     </View>
                   ))}
+                </View>
+              ) : null}
+              {receiptContext ? (
+                <View style={styles.contextReview}>
+                  <Text style={styles.panelTitle}>Receipt context</Text>
+                  <View style={styles.extractedFieldRow}>
+                    <Text style={styles.label}>Place</Text>
+                    <Text style={styles.extractedFieldValue}>
+                      {receiptContext.location || "No place captured"}
+                    </Text>
+                  </View>
+                  <View style={styles.extractedFieldRow}>
+                    <Text style={styles.label}>Billable client</Text>
+                    <Text style={styles.extractedFieldValue}>
+                      {receiptContext.billableClient || "No billable client"}
+                    </Text>
+                  </View>
+                  <View style={styles.contextToggleRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: receiptContext.hasContext }}
+                      onPress={() =>
+                        handleReceiptContextDecision(
+                          CONTEXT_REVIEW_DECISIONS.CONFIRM,
+                        )
+                      }
+                      style={({ pressed }) => [
+                        styles.contextToggleButton,
+                        receiptContext.hasContext
+                          ? styles.contextToggleButtonSelected
+                          : null,
+                        pressed ? styles.contextToggleButtonPressed : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.contextToggleText,
+                          receiptContext.hasContext
+                            ? styles.contextToggleTextSelected
+                            : null,
+                        ]}
+                      >
+                        Confirm
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        selected: !receiptContext.hasContext,
+                      }}
+                      onPress={() =>
+                        handleReceiptContextDecision(
+                          CONTEXT_REVIEW_DECISIONS.CLEAR,
+                        )
+                      }
+                      style={({ pressed }) => [
+                        styles.contextToggleButton,
+                        !receiptContext.hasContext
+                          ? styles.contextToggleButtonSelected
+                          : null,
+                        pressed ? styles.contextToggleButtonPressed : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.contextToggleText,
+                          !receiptContext.hasContext
+                            ? styles.contextToggleTextSelected
+                            : null,
+                        ]}
+                      >
+                        Clear
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
               ) : null}
               <View style={styles.actionRow}>
@@ -598,6 +691,44 @@ const styles = StyleSheet.create({
     gap: 24,
     paddingHorizontal: 24,
     paddingTop: 28,
+  },
+  contextReview: {
+    borderTopColor: "#E5E7EB",
+    borderTopWidth: 1,
+    gap: 10,
+    marginTop: 6,
+    paddingTop: 14,
+  },
+  contextToggleButton: {
+    alignItems: "center",
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    minWidth: 120,
+    paddingHorizontal: 14,
+  },
+  contextToggleButtonPressed: {
+    backgroundColor: "#E5E7EB",
+  },
+  contextToggleButtonSelected: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  contextToggleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  contextToggleText: {
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  contextToggleTextSelected: {
+    color: "#FFFFFF",
   },
   error: {
     color: "#B91C1C",
