@@ -14,6 +14,7 @@
   "dependencies": {
     "expo": "https://registry.npmjs.org/expo/-/expo-52.0.37.tgz",
     "expo-asset": "~11.0.5",
+    "expo-calendar": "~14.0.6",
     "expo-file-system": "~18.0.11",
     "expo-image-picker": "~16.0.6",
     "expo-sharing": "~13.0.1",

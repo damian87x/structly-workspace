@@ -12,6 +12,12 @@
           "microphonePermission": false,
           "photosPermission": "Structly uses your photo library so you can choose receipt photos."
         }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Structly uses your calendar to match receipt times to client meetings."
+        }
       ]
     ],
     "scheme": "structly",
