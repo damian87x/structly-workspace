@@ -30,6 +30,12 @@ const {
 } = require("../src/lib/claudeVisionClient");
 const { applyCorrection } = require("../src/lib/reviewQueue");
 const { processReceipts } = require("../src/lib/receiptPipeline");
+const {
+  attachCalendarContext,
+  deriveBillable,
+  findEventForReceipt,
+  getReceiptCalendarContext,
+} = require("../src/lib/calendarContext");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -1158,6 +1164,183 @@ async function verifyReceiptPipelineModule() {
   });
 }
 
+async function verifyCalendarContextModule() {
+  const capturedAt = "2026-07-08T10:30:00+01:00";
+  const overlappingEvent = {
+    calendarId: "work",
+    endDate: "2026-07-08T11:00:00+01:00",
+    id: "event-overlap",
+    startDate: "2026-07-08T10:00:00+01:00",
+    title: "Acme Ltd - VAT review",
+  };
+  const nearerNonOverlap = {
+    calendarId: "work",
+    endDate: "2026-07-08T10:20:00+01:00",
+    id: "event-near-past",
+    startDate: "2026-07-08T10:15:00+01:00",
+    title: "Internal sync",
+  };
+  const nearestEvent = {
+    calendarId: "work",
+    endDate: "2026-07-08T12:00:00+01:00",
+    id: "event-nearest",
+    startDate: "2026-07-08T11:15:00+01:00",
+    title: "Beta Co - Planning",
+  };
+  const outsideWindowEvent = {
+    calendarId: "work",
+    endDate: "2026-07-08T13:30:00+01:00",
+    id: "event-outside",
+    startDate: "2026-07-08T12:45:00+01:00",
+    title: "Gamma Co - Follow-up",
+  };
+
+  assert.equal(
+    findEventForReceipt(capturedAt, [nearerNonOverlap, overlappingEvent]),
+    overlappingEvent,
+  );
+  assert.equal(
+    findEventForReceipt(capturedAt, [outsideWindowEvent, nearestEvent]),
+    nearestEvent,
+  );
+  assert.equal(
+    findEventForReceipt(capturedAt, [outsideWindowEvent], {
+      windowMinutes: 60,
+    }),
+    null,
+  );
+  assert.equal(findEventForReceipt(capturedAt, []), null);
+
+  assert.deepEqual(deriveBillable(overlappingEvent), {
+    billable: true,
+    client: "Acme Ltd",
+    project: "VAT review",
+  });
+  assert.deepEqual(
+    deriveBillable({
+      endDate: "2026-07-08T13:00:00+01:00",
+      startDate: "2026-07-08T12:00:00+01:00",
+      title: "Lunch with Sam",
+    }),
+    {
+      billable: false,
+      client: null,
+      project: null,
+    },
+  );
+
+  const calls = [];
+  const fakeCalendar = {
+    EntityTypes: { EVENT: "event" },
+    async getCalendarsAsync(entityType) {
+      calls.push(["getCalendars", entityType]);
+      return [{ id: "work" }];
+    },
+    async getEventsAsync(calendarIds, startDate, endDate) {
+      calls.push([
+        "getEvents",
+        calendarIds,
+        startDate.toISOString(),
+        endDate.toISOString(),
+      ]);
+      return [nearestEvent, overlappingEvent];
+    },
+    async requestCalendarPermissionsAsync() {
+      calls.push(["requestCalendarPermissions"]);
+      return { status: "granted" };
+    },
+  };
+
+  const calContext = await getReceiptCalendarContext(capturedAt, {
+    calendar: fakeCalendar,
+  });
+
+  assert.deepEqual(calls, [
+    ["requestCalendarPermissions"],
+    ["getCalendars", "event"],
+    [
+      "getEvents",
+      ["work"],
+      "2026-07-08T08:00:00.000Z",
+      "2026-07-08T11:00:00.000Z",
+    ],
+  ]);
+  assert.deepEqual(calContext, {
+    billable: {
+      billable: true,
+      client: "Acme Ltd",
+      project: "VAT review",
+    },
+    calendar: {
+      calendarId: "work",
+      endDate: "2026-07-08T10:00:00.000Z",
+      eventId: "event-overlap",
+      location: null,
+      startDate: "2026-07-08T09:00:00.000Z",
+      title: "Acme Ltd - VAT review",
+    },
+  });
+
+  const deniedContext = await getReceiptCalendarContext(capturedAt, {
+    calendar: {
+      async requestCalendarPermissionsAsync() {
+        return { status: "denied" };
+      },
+    },
+  });
+  assert.equal(deniedContext, null);
+
+  const emptyContext = await getReceiptCalendarContext(capturedAt, {
+    calendar: {
+      EntityTypes: { EVENT: "event" },
+      async getCalendarsAsync() {
+        return [{ id: "work" }];
+      },
+      async getEventsAsync() {
+        return [];
+      },
+      async requestCalendarPermissionsAsync() {
+        return { granted: true };
+      },
+    },
+  });
+  assert.equal(emptyContext, null);
+
+  const minimalCalls = [];
+  const minimalFakeContext = await getReceiptCalendarContext(capturedAt, {
+    calendar: {
+      async getEventsAsync(startDate, endDate) {
+        minimalCalls.push([startDate.toISOString(), endDate.toISOString()]);
+        return [nearestEvent];
+      },
+      async requestCalendarPermissionsAsync() {
+        return { status: "granted" };
+      },
+    },
+  });
+  assert.deepEqual(minimalCalls, [
+    ["2026-07-08T08:00:00.000Z", "2026-07-08T11:00:00.000Z"],
+  ]);
+  assert.equal(minimalFakeContext.calendar.eventId, "event-nearest");
+
+  const receipt = {
+    context: { source: "camera" },
+    fields: { gross: 24, vendor: "Acme Cafe" },
+  };
+  const attachedReceipt = attachCalendarContext(receipt, calContext);
+
+  assert.notEqual(attachedReceipt, receipt);
+  assert.deepEqual(receipt.context, { source: "camera" });
+  assert.deepEqual(attachedReceipt, {
+    context: {
+      billable: calContext.billable,
+      calendar: calContext.calendar,
+      source: "camera",
+    },
+    fields: { gross: 24, vendor: "Acme Cafe" },
+  });
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -1172,6 +1355,7 @@ async function main() {
   await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();
   await verifyReceiptPipelineModule();
+  await verifyCalendarContextModule();
   console.log("Acceptance checks passed.");
 }
 
