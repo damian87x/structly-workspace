@@ -21,6 +21,7 @@ import {
   RECEIPT_FIELD_ROWS,
   confirmReceiptExtraction,
 } from "./src/lib/confirmReceiptExtraction";
+import { enrichReceipt } from "./src/lib/enrichReceipt";
 import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
 import {
   pickReceiptFromLibrary,
@@ -36,6 +37,60 @@ function formatFieldValue(value) {
   }
 
   return String(value);
+}
+
+function getContext(context) {
+  return context && typeof context === "object" && !Array.isArray(context)
+    ? context
+    : {};
+}
+
+function buildReviewReceipt(extractedReceipt, sourceReceipt) {
+  const capturedAt = sourceReceipt.capturedAt || new Date().toISOString();
+  const source = sourceReceipt.source || null;
+
+  return {
+    ...extractedReceipt,
+    capturedAt,
+    source,
+    sourceUri: sourceReceipt.uri || null,
+    context: {
+      ...getContext(extractedReceipt.context),
+      capturedAt,
+      source,
+    },
+  };
+}
+
+function isSameReviewedReceipt(currentReceipt, expectedReceipt) {
+  return (
+    currentReceipt?.capturedAt === expectedReceipt.capturedAt &&
+    currentReceipt?.source === expectedReceipt.source &&
+    currentReceipt?.sourceUri === expectedReceipt.sourceUri
+  );
+}
+
+function mergeEnrichedReceiptContext(currentRows, expectedReceipt, enrichedReceipt) {
+  const currentReceipt = currentRows[0];
+
+  if (
+    !currentReceipt ||
+    !enrichedReceipt?.context ||
+    !isSameReviewedReceipt(currentReceipt, expectedReceipt)
+  ) {
+    return currentRows;
+  }
+
+  return [
+    {
+      ...currentReceipt,
+      context: {
+        ...getContext(currentReceipt.context),
+        ...enrichedReceipt.context,
+      },
+    },
+    ...currentRows.slice(1),
+  ];
 }
 
 export default function App() {
@@ -261,8 +316,21 @@ function CaptureScreen({ email, vision }) {
 
     try {
       const result = await confirmReceiptExtraction(receipt, { vision });
-      setReviewedReceipts([result.receipt]);
+      const receiptForReview = buildReviewReceipt(result.receipt, receipt);
+
+      setReviewedReceipts([receiptForReview]);
       setConfirmedReceipt(true);
+      void enrichReceipt(receiptForReview)
+        .then((enrichedReceipt) => {
+          setReviewedReceipts((currentRows) =>
+            mergeEnrichedReceiptContext(
+              currentRows,
+              receiptForReview,
+              enrichedReceipt,
+            ),
+          );
+        })
+        .catch(() => {});
     } catch (error) {
       setCaptureError(error?.message || "Unable to extract receipt fields.");
     } finally {

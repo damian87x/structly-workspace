@@ -16,6 +16,10 @@ const {
   confirmReceiptExtraction,
 } = require("../src/lib/confirmReceiptExtraction");
 const {
+  ENRICHMENT_TIMEOUT_MS,
+  enrichReceipt,
+} = require("../src/lib/enrichReceipt");
+const {
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
 const { exportSheet } = require("../src/lib/exportShare");
@@ -116,6 +120,16 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /buildReceiptSheet/);
   assert.match(appSource, /confirmReceiptExtraction/);
   assert.match(appSource, /confirmReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/);
+  assert.ok(
+    appSource.includes('import { enrichReceipt } from "./src/lib/enrichReceipt";'),
+  );
+  assert.match(
+    appSource,
+    /const receiptForReview = buildReviewReceipt\(result\.receipt, receipt\);[\s\S]*setReviewedReceipts\(\[receiptForReview\]\);[\s\S]*setConfirmedReceipt\(true\);[\s\S]*void enrichReceipt\(receiptForReview\)/,
+  );
+  assert.doesNotMatch(appSource, /await enrichReceipt/);
+  assert.match(appSource, /function mergeEnrichedReceiptContext/);
+  assert.match(appSource, /\.\.\.enrichedReceipt\.context/);
   assert.match(appSource, /RECEIPT_FIELD_ROWS\.map/);
   assert.match(appSource, /fieldRow\.label/);
   assert.match(appSource, /fieldRow\.displayValue/);
@@ -1486,6 +1500,263 @@ async function verifyCalendarContextModule() {
   });
 }
 
+async function verifyEnrichReceiptModule() {
+  await withNetworkBlocked(async () => {
+    const capturedAt = "2026-07-08T10:30:00+01:00";
+    const matchingEvent = {
+      calendarId: "work",
+      endDate: "2026-07-08T11:00:00+01:00",
+      id: "event-acme",
+      location: "Client office",
+      startDate: "2026-07-08T10:00:00+01:00",
+      title: "Acme Ltd - VAT review",
+    };
+    const receipt = {
+      capturedAt,
+      fields: { gross: 24, vendor: "Acme Cafe" },
+      source: "camera",
+      validation: { issues: [], needsReview: false },
+    };
+    const originalSnapshot = JSON.parse(JSON.stringify(receipt));
+    const locationCalls = [];
+    const enrichedReceipt = await enrichReceipt(receipt, {
+      events: [matchingEvent],
+      location: {
+        async getCurrentPositionAsync(options) {
+          locationCalls.push(["getCurrentPosition", options]);
+
+          return {
+            coords: {
+              latitude: 51.5074,
+              longitude: -0.1278,
+            },
+          };
+        },
+        async requestForegroundPermissionsAsync() {
+          locationCalls.push(["requestForegroundPermissions"]);
+          return { status: "granted" };
+        },
+        async reverseGeocodeAsync(coords) {
+          locationCalls.push(["reverseGeocode", coords]);
+
+          return [
+            {
+              city: "London",
+              country: "United Kingdom",
+              name: "Acme Cafe",
+              region: "England",
+            },
+          ];
+        },
+      },
+    });
+
+    assert.notEqual(enrichedReceipt, receipt);
+    assert.deepEqual(receipt, originalSnapshot);
+    assert.deepEqual(locationCalls, [
+      ["requestForegroundPermissions"],
+      ["getCurrentPosition", {}],
+      ["reverseGeocode", { latitude: 51.5074, longitude: -0.1278 }],
+    ]);
+    assert.deepEqual(enrichedReceipt.context.location, {
+      latitude: 51.5074,
+      longitude: -0.1278,
+      placeName: "Acme Cafe",
+      city: "London",
+      region: "England",
+      country: "United Kingdom",
+    });
+    assert.deepEqual(enrichedReceipt.context.calendar, {
+      calendarId: "work",
+      endDate: "2026-07-08T10:00:00.000Z",
+      eventId: "event-acme",
+      location: "Client office",
+      startDate: "2026-07-08T09:00:00.000Z",
+      title: "Acme Ltd - VAT review",
+    });
+    assert.deepEqual(enrichedReceipt.context.billable, {
+      billable: true,
+      client: "Acme Ltd",
+      project: "VAT review",
+    });
+    assert.equal(enrichedReceipt.context.source, "camera");
+
+    let libraryProviderCalled = false;
+    const libraryReceipt = {
+      capturedAt,
+      fields: { gross: 12, vendor: "Library Cafe" },
+      source: "library",
+    };
+    const untouchedLibraryReceipt = await enrichReceipt(libraryReceipt, {
+      events: [matchingEvent],
+      location: {
+        async getCurrentPositionAsync() {
+          libraryProviderCalled = true;
+          return { coords: { latitude: 51.5074, longitude: -0.1278 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          libraryProviderCalled = true;
+          return { status: "granted" };
+        },
+        async reverseGeocodeAsync() {
+          libraryProviderCalled = true;
+          return [];
+        },
+      },
+    });
+
+    assert.equal(untouchedLibraryReceipt, libraryReceipt);
+    assert.equal(libraryProviderCalled, false);
+
+    let requestedPositionAfterDenied = false;
+    let requestedEventsAfterDenied = false;
+    const deniedReceipt = {
+      capturedAt,
+      fields: { gross: 15, vendor: "Denied Cafe" },
+      source: "camera",
+    };
+    const deniedResult = await enrichReceipt(deniedReceipt, {
+      calendar: {
+        async getEventsAsync() {
+          requestedEventsAfterDenied = true;
+          return [matchingEvent];
+        },
+        async requestCalendarPermissionsAsync() {
+          return { status: "denied" };
+        },
+      },
+      location: {
+        async getCurrentPositionAsync() {
+          requestedPositionAfterDenied = true;
+          return { coords: { latitude: 51.5074, longitude: -0.1278 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          return { status: "denied" };
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+
+    assert.equal(deniedResult, deniedReceipt);
+    assert.equal(requestedPositionAfterDenied, false);
+    assert.equal(requestedEventsAfterDenied, false);
+
+    const throwingReceipt = {
+      capturedAt,
+      fields: { gross: 18, vendor: "Throwing Cafe" },
+      source: "camera",
+    };
+    const throwingResult = await enrichReceipt(throwingReceipt, {
+      calendar: {
+        async getEventsAsync() {
+          throw new Error("Calendar unavailable.");
+        },
+        async requestCalendarPermissionsAsync() {
+          return { status: "granted" };
+        },
+      },
+      location: {
+        async getCurrentPositionAsync() {
+          throw new Error("Location unavailable.");
+        },
+        async requestForegroundPermissionsAsync() {
+          return { status: "granted" };
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+
+    assert.equal(throwingResult, throwingReceipt);
+
+    const slowReceipt = {
+      capturedAt,
+      fields: { gross: 21, vendor: "Slow Cafe" },
+      source: "camera",
+    };
+    const slowStartedAt = Date.now();
+    const slowResult = await enrichReceipt(slowReceipt, {
+      calendar: {
+        async getEventsAsync() {
+          return [matchingEvent];
+        },
+        async requestCalendarPermissionsAsync() {
+          return new Promise(() => {});
+        },
+      },
+      location: {
+        async getCurrentPositionAsync() {
+          return { coords: { latitude: 51.5074, longitude: -0.1278 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          return new Promise(() => {});
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+    const slowElapsedMs = Date.now() - slowStartedAt;
+
+    assert.equal(slowResult, slowReceipt);
+    assert.ok(
+      slowElapsedMs < ENRICHMENT_TIMEOUT_MS + 1000,
+      `slow enrichment resolved after ${slowElapsedMs}ms`,
+    );
+
+    const pipelineResult = await processReceipts(
+      [{ mimeType: "image/jpeg", uri: "file://pipeline-enrichment.jpg" }],
+      {
+        vision: {
+          async extractReceipt() {
+            return {
+              fields: {
+                category: { confidence: 0.95, value: "Meals" },
+                date: { confidence: 0.96, value: "2026-07-08" },
+                gross: { confidence: 0.98, value: "24.00" },
+                net: { confidence: 0.98, value: "20.00" },
+                vat: { confidence: 0.98, value: "4.00" },
+                vendor: { confidence: 0.99, value: "Pipeline Cafe" },
+              },
+            };
+          },
+        },
+      },
+    );
+    const pipelineReceipt = {
+      ...pipelineResult.receipts[0],
+      capturedAt,
+      source: "camera",
+    };
+    const pendingEnrichment = enrichReceipt(pipelineReceipt, {
+      events: [],
+      location: {
+        async getCurrentPositionAsync() {
+          return { coords: { latitude: 51.5074, longitude: -0.1278 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          return new Promise(() => {});
+        },
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    });
+
+    assert.equal(pipelineResult.receipts.length, 1);
+    assert.equal(pipelineResult.failures.length, 0);
+    assert.deepEqual(pipelineResult.sheet.csv.split("\n"), [
+      "vendor,date,net,vat,gross,category",
+      "Pipeline Cafe,2026-07-08,20,4,24,Meals",
+    ]);
+    assert.equal(pipelineResult.sheet.validation.needsReviewCount, 0);
+    assert.equal(await pendingEnrichment, pipelineReceipt);
+  });
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -1502,6 +1773,7 @@ async function main() {
   await verifyReceiptPipelineModule();
   await verifyLocationContextModule();
   await verifyCalendarContextModule();
+  await verifyEnrichReceiptModule();
   console.log("Acceptance checks passed.");
 }
 
