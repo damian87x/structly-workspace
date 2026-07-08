@@ -170,6 +170,7 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Billable client/);
   assert.match(appSource, /CONTEXT_REVIEW_DECISIONS\.CONFIRM/);
   assert.match(appSource, /CONTEXT_REVIEW_DECISIONS\.CLEAR/);
+  assert.doesNotMatch(appSource, /!receiptContext\.decision ===/);
   assert.match(appSource, /Confirm/);
   assert.match(appSource, /Clear/);
   assert.match(appSource, /Export\/Share/);

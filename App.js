@@ -515,7 +515,7 @@ function CaptureScreen({ email, vision }) {
                       }
                       style={({ pressed }) => [
                         styles.contextToggleButton,
-                        !receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
+                        receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CLEAR
                           ? styles.contextToggleButtonSelected
                           : null,
                         pressed ? styles.contextToggleButtonPressed : null,
@@ -524,7 +524,7 @@ function CaptureScreen({ email, vision }) {
                       <Text
                         style={[
                           styles.contextToggleText,
-                          !receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
+                          receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CLEAR
                             ? styles.contextToggleTextSelected
                             : null,
                         ]}
