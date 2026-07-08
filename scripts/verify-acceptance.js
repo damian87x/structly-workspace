@@ -37,6 +37,7 @@ const {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
   getReceiptContextDisplay,
+  mergeReceiptContextSuggestion,
 } = require("../src/lib/receiptContextReview");
 const { processReceipts } = require("../src/lib/receiptPipeline");
 const {
@@ -134,7 +135,7 @@ function verifyScaffoldFiles() {
   );
   assert.doesNotMatch(appSource, /await enrichReceipt/);
   assert.match(appSource, /function mergeEnrichedReceiptContext/);
-  assert.match(appSource, /\.\.\.enrichedReceipt\.context/);
+  assert.match(appSource, /mergeReceiptContextSuggestion\(currentReceipt, enrichedReceipt\.context\)/);
   assert.match(appSource, /RECEIPT_FIELD_ROWS\.map/);
   assert.match(appSource, /fieldRow\.label/);
   assert.match(appSource, /fieldRow\.displayValue/);
@@ -145,7 +146,7 @@ function verifyScaffoldFiles() {
   );
   assert.ok(
     appSource.includes(
-      'import {\n  CONTEXT_REVIEW_DECISIONS,\n  applyReceiptContextDecision,\n  getReceiptContextDisplay,\n} from "./src/lib/receiptContextReview";',
+      'import {\n  CONTEXT_REVIEW_DECISIONS,\n  applyReceiptContextDecision,\n  getReceiptContextDisplay,\n  mergeReceiptContextSuggestion,\n} from "./src/lib/receiptContextReview";',
     ),
   );
   assert.match(appSource, /Rows:/);
@@ -1234,11 +1235,13 @@ function verifyReceiptContextReviewHelper() {
 
   assert.deepEqual(display, {
     billableClient: "Acme Ltd",
+    decision: CONTEXT_REVIEW_DECISIONS.CONFIRM,
     hasContext: true,
     location: "Acme Cafe",
   });
   assert.deepEqual(getReceiptContextDisplay({}), {
     billableClient: "",
+    decision: CONTEXT_REVIEW_DECISIONS.CONFIRM,
     hasContext: false,
     location: "",
   });
@@ -1251,6 +1254,7 @@ function verifyReceiptContextReviewHelper() {
     }),
     {
       billableClient: "",
+      decision: CONTEXT_REVIEW_DECISIONS.CONFIRM,
       hasContext: true,
       location: "Desk",
     },
@@ -1261,7 +1265,11 @@ function verifyReceiptContextReviewHelper() {
     0,
     CONTEXT_REVIEW_DECISIONS.CONFIRM,
   );
-  assert.equal(confirmedRows, originalRows);
+  assert.notEqual(confirmedRows, originalRows);
+  assert.notEqual(confirmedRows[0], originalRows[0]);
+  assert.equal(confirmedRows[1], originalRows[1]);
+  assert.deepEqual(originalRows, originalSnapshot);
+  assert.equal(confirmedRows[0].context.contextReview.decision, CONTEXT_REVIEW_DECISIONS.CONFIRM);
 
   const clearedRows = applyReceiptContextDecision(
     originalRows,
@@ -1286,11 +1294,59 @@ function verifyReceiptContextReviewHelper() {
     project: null,
   });
   assert.deepEqual(getReceiptContextDisplay(clearedRows[0]), {
-    billableClient: "",
-    hasContext: false,
-    location: "",
+    billableClient: "Acme Ltd",
+    decision: CONTEXT_REVIEW_DECISIONS.CLEAR,
+    hasContext: true,
+    location: "Acme Cafe",
   });
   assert.deepEqual(buildReceiptSheet(clearedRows).csv.split("\n")[1], [
+    "Acme Cafe",
+    "2026-07-08",
+    "20",
+    "4",
+    "24",
+    "Meals",
+    "",
+    "",
+  ].join(","));
+
+
+  const restoredRows = applyReceiptContextDecision(
+    clearedRows,
+    0,
+    CONTEXT_REVIEW_DECISIONS.CONFIRM,
+  );
+  assert.deepEqual(getReceiptContextDisplay(restoredRows[0]), {
+    billableClient: "Acme Ltd",
+    decision: CONTEXT_REVIEW_DECISIONS.CONFIRM,
+    hasContext: true,
+    location: "Acme Cafe",
+  });
+  assert.deepEqual(restoredRows[0].context.location, originalRows[0].context.location);
+  assert.deepEqual(restoredRows[0].context.billable, originalRows[0].context.billable);
+
+  const clearedBeforeEnrichment = applyReceiptContextDecision(
+    [{ context: { capturedAt: "2026-07-08T10:30:00.000Z", source: "camera" }, fields: originalRows[0].fields }],
+    0,
+    CONTEXT_REVIEW_DECISIONS.CLEAR,
+  )[0];
+  const lateMergedReceipt = mergeReceiptContextSuggestion(
+    clearedBeforeEnrichment,
+    originalRows[0].context,
+  );
+  assert.deepEqual(getReceiptContextDisplay(lateMergedReceipt), {
+    billableClient: "Acme Ltd",
+    decision: CONTEXT_REVIEW_DECISIONS.CLEAR,
+    hasContext: true,
+    location: "Acme Cafe",
+  });
+  assert.equal(lateMergedReceipt.context.location, null);
+  assert.deepEqual(lateMergedReceipt.context.billable, {
+    billable: false,
+    client: null,
+    project: null,
+  });
+  assert.deepEqual(buildReceiptSheet([lateMergedReceipt]).csv.split("\n")[1], [
     "Acme Cafe",
     "2026-07-08",
     "20",

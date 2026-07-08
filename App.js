@@ -32,6 +32,7 @@ import {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
   getReceiptContextDisplay,
+  mergeReceiptContextSuggestion,
 } from "./src/lib/receiptContextReview";
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
@@ -87,13 +88,7 @@ function mergeEnrichedReceiptContext(currentRows, expectedReceipt, enrichedRecei
   }
 
   return [
-    {
-      ...currentReceipt,
-      context: {
-        ...getContext(currentReceipt.context),
-        ...enrichedReceipt.context,
-      },
-    },
+    mergeReceiptContextSuggestion(currentReceipt, enrichedReceipt.context),
     ...currentRows.slice(1),
   ];
 }
@@ -477,7 +472,11 @@ function CaptureScreen({ email, vision }) {
                   <View style={styles.contextToggleRow}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityState={{ selected: receiptContext.hasContext }}
+                      accessibilityState={{
+                        selected:
+                          receiptContext.decision ===
+                          CONTEXT_REVIEW_DECISIONS.CONFIRM,
+                      }}
                       onPress={() =>
                         handleReceiptContextDecision(
                           CONTEXT_REVIEW_DECISIONS.CONFIRM,
@@ -485,7 +484,7 @@ function CaptureScreen({ email, vision }) {
                       }
                       style={({ pressed }) => [
                         styles.contextToggleButton,
-                        receiptContext.hasContext
+                        receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
                           ? styles.contextToggleButtonSelected
                           : null,
                         pressed ? styles.contextToggleButtonPressed : null,
@@ -494,7 +493,7 @@ function CaptureScreen({ email, vision }) {
                       <Text
                         style={[
                           styles.contextToggleText,
-                          receiptContext.hasContext
+                          receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
                             ? styles.contextToggleTextSelected
                             : null,
                         ]}
@@ -505,7 +504,9 @@ function CaptureScreen({ email, vision }) {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityState={{
-                        selected: !receiptContext.hasContext,
+                        selected:
+                          receiptContext.decision ===
+                          CONTEXT_REVIEW_DECISIONS.CLEAR,
                       }}
                       onPress={() =>
                         handleReceiptContextDecision(
@@ -514,7 +515,7 @@ function CaptureScreen({ email, vision }) {
                       }
                       style={({ pressed }) => [
                         styles.contextToggleButton,
-                        !receiptContext.hasContext
+                        !receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
                           ? styles.contextToggleButtonSelected
                           : null,
                         pressed ? styles.contextToggleButtonPressed : null,
@@ -523,7 +524,7 @@ function CaptureScreen({ email, vision }) {
                       <Text
                         style={[
                           styles.contextToggleText,
-                          !receiptContext.hasContext
+                          !receiptContext.decision === CONTEXT_REVIEW_DECISIONS.CONFIRM
                             ? styles.contextToggleTextSelected
                             : null,
                         ]}
