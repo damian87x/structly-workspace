@@ -15,6 +15,16 @@ npm run test:ci
 - Edge Function handler E2E via `scripts/verify-edge-functions.js`
 - Pixel smoke parser self-test via `scripts/verify-pixel-device.js --self-test`
 
+## Manual Release Gate
+
+Before claiming the full mobile integration is release-ready, run:
+
+```sh
+npm run test:integration:release
+```
+
+This gate runs `test:ci`, `test:live:local`, strict production live smoke with `--require-all-integrations`, and strict Pixel hardware smoke with device, install, foreground location, and launch checks. It is intentionally not part of the default CI path because it requires deployed Supabase Functions credentials and a connected Google Pixel.
+
 ## GitHub Actions Template
 
 Adding this workflow requires a GitHub token with `workflow` scope.

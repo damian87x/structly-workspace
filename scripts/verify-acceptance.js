@@ -3597,6 +3597,10 @@ function verifyE2EHarnessSource() {
     "scripts/verify-local-live-integrations.js",
     "utf8",
   );
+  const releaseGateSource = fs.readFileSync(
+    "scripts/verify-integration-release-gate.js",
+    "utf8",
+  );
   const pixelSmokeSource = fs.readFileSync(
     "scripts/verify-pixel-device.js",
     "utf8",
@@ -3615,6 +3619,10 @@ function verifyE2EHarnessSource() {
   assert.equal(
     pkg.scripts["test:live:local"],
     "node scripts/verify-local-live-integrations.js",
+  );
+  assert.equal(
+    pkg.scripts["test:integration:release"],
+    "node scripts/verify-integration-release-gate.js",
   );
   assert.equal(pkg.scripts["test:pixel"], "node scripts/verify-pixel-device.js");
   assert.equal(
@@ -3674,6 +3682,14 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyDeviceHeartbeat/);
   assert.match(liveSmokeSource, /verifyWorkerHeartbeat/);
   assert.match(liveSmokeSource, /--require-live/);
+  assert.match(releaseGateSource, /test:ci/);
+  assert.match(releaseGateSource, /test:live:local/);
+  assert.match(releaseGateSource, /--require-all-integrations/);
+  assert.match(releaseGateSource, /--require-device/);
+  assert.match(releaseGateSource, /--require-install/);
+  assert.match(releaseGateSource, /--require-location-granted/);
+  assert.match(releaseGateSource, /--require-launch/);
+  assert.match(releaseGateSource, /sanitizeOutput/);
   assert.match(pixelSmokeSource, /adb/);
   assert.match(pixelSmokeSource, /STRUCTLY_ADB_PATH/);
   assert.match(pixelSmokeSource, /ANDROID_SDK_ROOT/);
@@ -3690,6 +3706,7 @@ function verifyE2EHarnessSource() {
   assert.match(pixelSmokeSource, /pidof/);
   assert.match(pixelSmokeSource, /ro\.product\.model/);
   assert.match(ciDocs, /npm run test:ci/);
+  assert.match(ciDocs, /npm run test:integration:release/);
   assert.match(ciDocs, /actions\/checkout@v5/);
   assert.match(ciDocs, /actions\/setup-node@v6/);
   assert.match(ciDocs, /workflow` scope/);

@@ -32,6 +32,16 @@ npm run test:live:local
 
 It verifies device heartbeat, worker heartbeat, status, location suggestion, trigger dispatch, trigger lifecycle actions, code execution request creation, Daytona runner handling with a local mock result, signed Composio webhook ingestion, schedule tick ingestion, and MCP tool listing/calling with a local mock result against local Edge Functions.
 
+## Release Gate
+
+To prove local contracts, local backend integration, deployed full live integration, and Pixel hardware readiness in one manual pass:
+
+```sh
+npm run test:integration:release
+```
+
+This command is expected to fail until the production live env listed below is configured and a Pixel with the Structly app installed is connected over ADB with foreground location granted.
+
 ## Optional Paths
 
 Location suggestion:
