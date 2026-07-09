@@ -29,6 +29,12 @@ Direct trigger dispatch:
 STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID="trigger-definition-id"
 ```
 
+Trigger lifecycle actions:
+
+```sh
+STRUCTLY_TEST_TRIGGER_ACTIONS="1"
+```
+
 Code execution request:
 
 ```sh
@@ -87,6 +93,7 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 - `heartbeat-ingest` records a backend worker heartbeat only when the worker heartbeat token is configured.
 - `location-suggestions` records a coarse Pixel-style location suggestion when a trigger id is configured.
 - `trigger-dispatch` records a user-authenticated event and queues one idempotent trigger run when a trigger id is configured.
+- `trigger-actions` can create, pause, resume, and delete a throwaway trigger when explicitly enabled.
 - `code-execution-bridge` creates an approval-required backend-owned code request when a trigger id is configured.
 - `code-execution-runner` runs approved TypeScript code inside the configured Daytona sandbox when runner env is configured.
 - `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.

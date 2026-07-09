@@ -24,6 +24,7 @@ const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET",
 ];
 const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
+const TRIGGER_ACTIONS_ENV = ["STRUCTLY_TEST_TRIGGER_ACTIONS"];
 const TRIGGER_DISPATCH_ENV = ["STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID"];
 const WORKER_HEARTBEAT_ENV = ["STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"];
 
@@ -214,6 +215,90 @@ async function verifyTriggerDispatch(config) {
   assert.equal(result.data.queued, true);
 
   return result.data;
+}
+
+async function verifyTriggerActions(config) {
+  const name = `Live smoke trigger ${Date.now()}`;
+  const created = await callFunction({
+    body: {
+      action: "create",
+      patch: {
+        name,
+        source: "live-smoke",
+        type: "live_smoke",
+      },
+      userId: config.userId,
+    },
+    config,
+    functionName: "trigger-actions",
+  });
+
+  assert.equal(
+    created.status,
+    200,
+    `trigger-actions create failed: ${JSON.stringify(created)}`,
+  );
+  assert.equal(created.data.action, "create");
+  assert.equal(created.data.trigger.name, name);
+  assert.equal(created.data.trigger.source, "live-smoke");
+  assert.equal(created.data.trigger.status, "active");
+
+  const triggerId = created.data.trigger.id;
+  const paused = await callFunction({
+    body: {
+      action: "pause",
+      triggerId,
+      userId: config.userId,
+    },
+    config,
+    functionName: "trigger-actions",
+  });
+
+  assert.equal(
+    paused.status,
+    200,
+    `trigger-actions pause failed: ${JSON.stringify(paused)}`,
+  );
+  assert.equal(paused.data.trigger.status, "paused");
+
+  const resumed = await callFunction({
+    body: {
+      action: "resume",
+      triggerId,
+      userId: config.userId,
+    },
+    config,
+    functionName: "trigger-actions",
+  });
+
+  assert.equal(
+    resumed.status,
+    200,
+    `trigger-actions resume failed: ${JSON.stringify(resumed)}`,
+  );
+  assert.equal(resumed.data.trigger.status, "active");
+
+  const deleted = await callFunction({
+    body: {
+      action: "delete",
+      triggerId,
+      userId: config.userId,
+    },
+    config,
+    functionName: "trigger-actions",
+  });
+
+  assert.equal(
+    deleted.status,
+    200,
+    `trigger-actions delete failed: ${JSON.stringify(deleted)}`,
+  );
+  assert.equal(deleted.data.trigger.status, "deleted");
+
+  return {
+    triggerId,
+    transitions: ["active", "paused", "active", "deleted"],
+  };
 }
 
 async function verifyCodeExecution(config) {
@@ -437,6 +522,10 @@ async function main() {
 
   if (missingEnv(TRIGGER_DISPATCH_ENV).length === 0) {
     results.triggerDispatch = await verifyTriggerDispatch(config);
+  }
+
+  if (missingEnv(TRIGGER_ACTIONS_ENV).length === 0) {
+    results.triggerActions = await verifyTriggerActions(config);
   }
 
   if (missingEnv(CODE_ENV).length === 0) {
