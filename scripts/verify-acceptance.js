@@ -3609,10 +3609,12 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /STRUCTLY_FUNCTIONS_URL/);
   assert.match(liveSmokeSource, /verifyStatusRead/);
   assert.match(liveSmokeSource, /verifyLocationSuggestion/);
+  assert.match(liveSmokeSource, /verifyTriggerDispatch/);
   assert.match(liveSmokeSource, /verifyCodeExecution/);
   assert.match(liveSmokeSource, /verifyDaytonaExecution/);
   assert.match(liveSmokeSource, /verifyComposioWebhook/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
   assert.match(liveSmokeSource, /verifyMcpBridge/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
@@ -3642,6 +3644,7 @@ function verifyE2EHarnessSource() {
   assert.match(ciDocs, /workflow` scope/);
   assert.match(liveSmokeDocs, /npm run test:live/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);

@@ -23,6 +23,12 @@ Location suggestion:
 STRUCTLY_TEST_LOCATION_TRIGGER_ID="location-trigger-id"
 ```
 
+Direct trigger dispatch:
+
+```sh
+STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID="trigger-definition-id"
+```
+
 Code execution request:
 
 ```sh
@@ -80,6 +86,7 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 - `heartbeat-ingest` records a Pixel-style device heartbeat with the user token.
 - `heartbeat-ingest` records a backend worker heartbeat only when the worker heartbeat token is configured.
 - `location-suggestions` records a coarse Pixel-style location suggestion when a trigger id is configured.
+- `trigger-dispatch` records a user-authenticated event and queues one idempotent trigger run when a trigger id is configured.
 - `code-execution-bridge` creates an approval-required backend-owned code request when a trigger id is configured.
 - `code-execution-runner` runs approved TypeScript code inside the configured Daytona sandbox when runner env is configured.
 - `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.

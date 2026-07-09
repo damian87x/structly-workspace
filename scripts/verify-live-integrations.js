@@ -24,6 +24,7 @@ const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET",
 ];
 const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
+const TRIGGER_DISPATCH_ENV = ["STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID"];
 const WORKER_HEARTBEAT_ENV = ["STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"];
 
 function getEnv(name) {
@@ -54,6 +55,7 @@ function getConfig() {
     requireLive: process.argv.includes("--require-live"),
     scheduleToken: getEnv("STRUCTLY_TEST_SCHEDULE_TOKEN"),
     scheduleTriggerId: getEnv("STRUCTLY_TEST_SCHEDULE_TRIGGER_ID"),
+    triggerDispatchTriggerId: getEnv("STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID"),
     userId: getEnv("STRUCTLY_TEST_USER_ID"),
     userToken: getEnv("STRUCTLY_TEST_USER_TOKEN"),
     workerHeartbeatToken: getEnv("STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"),
@@ -181,6 +183,35 @@ async function verifyLocationSuggestion(config) {
     `location-suggestions failed: ${JSON.stringify(result)}`,
   );
   assert.equal(result.data.suggestion.suggestedAction, "review_receipt_context");
+
+  return result.data;
+}
+
+async function verifyTriggerDispatch(config) {
+  const eventKey = `live-smoke-${Date.now()}`;
+  const result = await callFunction({
+    body: {
+      action: "live_smoke_dispatch",
+      eventKey,
+      eventType: "live_smoke",
+      payload: {
+        source: "live-smoke",
+      },
+      source: "live-smoke",
+      triggerId: config.triggerDispatchTriggerId,
+      userId: config.userId,
+    },
+    config,
+    functionName: "trigger-dispatch",
+  });
+
+  assert.equal(
+    result.status,
+    200,
+    `trigger-dispatch failed: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.data.idempotencyKey, `live-smoke:${eventKey}`);
+  assert.equal(result.data.queued, true);
 
   return result.data;
 }
@@ -402,6 +433,10 @@ async function main() {
 
   if (missingEnv(LOCATION_ENV).length === 0) {
     results.location = await verifyLocationSuggestion(config);
+  }
+
+  if (missingEnv(TRIGGER_DISPATCH_ENV).length === 0) {
+    results.triggerDispatch = await verifyTriggerDispatch(config);
   }
 
   if (missingEnv(CODE_ENV).length === 0) {
