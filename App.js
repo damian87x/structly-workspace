@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -16,6 +16,10 @@ import {
   getSupabaseConfig,
   signInWithPassword,
 } from "./src/lib/supabaseAuth";
+import {
+  callIntegrationFunction,
+  getIntegrationBackendConfig,
+} from "./src/lib/integrationBackend";
 import { buildReceiptSheet } from "./src/lib/buildSpreadsheet";
 import {
   RECEIPT_FIELD_ROWS,
@@ -29,6 +33,8 @@ import {
 } from "./src/lib/receiptCapture";
 import { buildReviewReceipt } from "./src/lib/reviewReceipt";
 import { applyCorrection } from "./src/lib/reviewQueue";
+import { getHealthRows } from "./src/lib/integrationCapabilities";
+import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
 import {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
@@ -37,6 +43,13 @@ import {
 } from "./src/lib/receiptContextReview";
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
+const INTEGRATION_CONTROL_ROWS = [
+  ["Create trigger", "canCreate"],
+  ["Edit", "canEdit"],
+  ["Pause", "canPause"],
+  ["Resume", "canResume"],
+  ["Delete", "canDelete"],
+];
 
 function formatFieldValue(value) {
   if (value === null || value === undefined) {
@@ -73,6 +86,7 @@ function mergeEnrichedReceiptContext(currentRows, expectedReceipt, enrichedRecei
 
 export default function App() {
   const config = useMemo(() => getSupabaseConfig(), []);
+  const backendConfig = useMemo(() => getIntegrationBackendConfig(), []);
   const [email, setEmail] = useState("");
   const [errorMessage, setErrorMessage] = useState(config.error);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -105,7 +119,14 @@ export default function App() {
   }
 
   if (session) {
-    return <CaptureScreen email={session.user?.email} />;
+    return (
+      <CaptureScreen
+        anonKey={config.anonKey}
+        backendConfig={backendConfig}
+        email={session.user?.email}
+        session={session}
+      />
+    );
   }
 
   return (
@@ -199,7 +220,7 @@ function SignInScreen({
   );
 }
 
-function CaptureScreen({ email, vision }) {
+function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [captureError, setCaptureError] = useState(null);
   const [confirmedReceipt, setConfirmedReceipt] = useState(false);
   const [exportError, setExportError] = useState(null);
@@ -209,6 +230,11 @@ function CaptureScreen({ email, vision }) {
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
+  const [backendStatus, setBackendStatus] = useState({
+    providerConfigured: false,
+    reachable: false,
+    stale: true,
+  });
   const receiptSheet = useMemo(
     () => buildReceiptSheet(reviewedReceipts),
     [reviewedReceipts],
@@ -217,6 +243,23 @@ function CaptureScreen({ email, vision }) {
     needsReviewCount: receiptSheet.validation.needsReviewCount,
     rowCount: reviewedReceipts.length,
   };
+  const integrationDashboard = useMemo(
+    () =>
+      getDefaultTriggerDashboard({
+        backend: {
+          reachable: backendStatus.reachable,
+          stale: backendStatus.stale,
+        },
+        background: {
+          configured: false,
+          supported: true,
+        },
+        providerConfigured: backendStatus.providerConfigured,
+        userId: email,
+      }),
+    [backendStatus, email],
+  );
+  const integrationHealthRows = getHealthRows(integrationDashboard.health);
   const needsReviewRow = receiptSheet.validation.needsReviewRows[0] || null;
   const reviewReceipt = needsReviewRow
     ? reviewedReceipts[needsReviewRow.index]
@@ -239,6 +282,59 @@ function CaptureScreen({ email, vision }) {
   const receiptContext = extractedReceipt
     ? getReceiptContextDisplay(extractedReceipt)
     : null;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!backendConfig || !session) {
+      return () => {
+        active = false;
+      };
+    }
+
+    callIntegrationFunction({
+      anonKey,
+      body: {},
+      config: backendConfig,
+      functionName: "status-read",
+      session,
+    })
+      .then(({ data, error }) => {
+        if (!active) {
+          return;
+        }
+
+        if (error || !data) {
+          setBackendStatus({
+            providerConfigured: false,
+            reachable: false,
+            stale: true,
+          });
+          return;
+        }
+
+        setBackendStatus({
+          providerConfigured: data.bridge === "available",
+          reachable: data.backend === "available",
+          stale:
+            data.workerHeartbeat === "stale" ||
+            data.workerHeartbeat === "failed",
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setBackendStatus({
+            providerConfigured: false,
+            reachable: false,
+            stale: true,
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [anonKey, backendConfig, session]);
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {
@@ -398,6 +494,58 @@ function CaptureScreen({ email, vision }) {
             <Text style={styles.panelMeta}>Exported: {exportResult.uri}</Text>
           ) : null}
           {exportError ? <Text style={styles.error}>{exportError}</Text> : null}
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>Integration health</Text>
+          {integrationHealthRows.map((row) => (
+            <View key={row.label} style={styles.statusRow}>
+              <Text style={styles.label}>{row.label}</Text>
+              <Text style={styles.statusValue}>{row.status}</Text>
+            </View>
+          ))}
+          <Text style={styles.panelMeta}>
+            {integrationDashboard.health.backgroundNote}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Connector status: {integrationDashboard.provider.copy}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Trigger list: {integrationDashboard.triggerListState}
+          </Text>
+          <Text style={styles.panelMeta}>Catalog source: backend</Text>
+          {integrationDashboard.triggers.map((trigger) => (
+            <View key={trigger.id} style={styles.triggerRow}>
+              <Text style={styles.label}>{trigger.name}</Text>
+              <Text style={styles.panelMeta}>{trigger.displayStatus}</Text>
+            </View>
+          ))}
+          <View style={styles.integrationControls}>
+            {INTEGRATION_CONTROL_ROWS.map(([label, controlKey]) => {
+              const enabled = integrationDashboard.triggerControls[controlKey];
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !enabled }}
+                  disabled={!enabled}
+                  key={label}
+                  style={[
+                    styles.smallButton,
+                    !enabled ? styles.smallButtonDisabled : null,
+                  ]}
+                >
+                  <Text style={styles.smallButtonText}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.panelMeta}>Run history</Text>
+          {integrationDashboard.runHistory.map((run) => (
+            <Text key={run.id} style={styles.panelMeta}>
+              {run.status}
+            </Text>
+          ))}
         </View>
 
         {receipt ? (
@@ -779,6 +927,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+  integrationControls: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   receiptPreview: {
     aspectRatio: 3 / 4,
     backgroundColor: "#E5E7EB",
@@ -790,6 +943,33 @@ const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: "#F9FAFB",
     flex: 1,
+  },
+  smallButton: {
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 8,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: 12,
+  },
+  smallButtonDisabled: {
+    backgroundColor: "#9CA3AF",
+  },
+  smallButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  statusRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  statusValue: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: "700",
   },
   secondaryButton: {
     alignItems: "center",
@@ -821,5 +1001,11 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontSize: 34,
     fontWeight: "800",
+  },
+  triggerRow: {
+    borderTopColor: "#E5E7EB",
+    borderTopWidth: 1,
+    gap: 4,
+    paddingTop: 10,
   },
 });

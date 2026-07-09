@@ -51,6 +51,74 @@ const {
   attachLocation,
   getReceiptLocation,
 } = require("../src/lib/locationContext");
+const {
+  BACKGROUND_EXECUTION_NOTE,
+  CAPABILITY_STATUS,
+  getBackendCapability,
+  getDefaultIntegrationHealth,
+  getHealthRows,
+  isIntegrationReady,
+} = require("../src/lib/integrationCapabilities");
+const {
+  buildFunctionUrl,
+  callIntegrationFunction,
+  createIntegrationHeaders,
+  getIntegrationBackendConfig,
+} = require("../src/lib/integrationBackend");
+const {
+  HEARTBEAT_STATUS,
+  classifyHeartbeat,
+  createDeviceHeartbeat,
+  createWorkerHeartbeat,
+  shouldSendHeartbeat,
+} = require("../src/lib/heartbeats");
+const {
+  TRIGGER_RUN_STATUS,
+  TRIGGER_STATUS,
+  approveTriggerRun,
+  createTriggerDefinition,
+  createTriggerPayload,
+  createTriggerRun,
+  deleteTriggerPayload,
+  getEventDedupeKey,
+  getTriggerDisplayStatus,
+  pauseTriggerPayload,
+  resumeTriggerPayload,
+  sanitizeTriggerPatch,
+  shouldEnqueueEvent,
+  updateTriggerPayload,
+} = require("../src/lib/triggers");
+const {
+  TRIGGER_LIST_STATE,
+  getDefaultTriggerDashboard,
+  getTriggerListState,
+} = require("../src/lib/integrationDashboard");
+const {
+  hasComposioSignature,
+  normalizeComposioEvent,
+  validateComposioWebhookEnvelope,
+} = require("../src/lib/composioBroker");
+const {
+  MCP_TRANSPORT,
+  assertMobileSafeMcpServer,
+  buildMcpToolInvocation,
+  getMobileSafeToolCatalog,
+} = require("../src/lib/mcpBridge");
+const {
+  buildAuditEvent,
+  buildHealthSummary,
+  buildRunTimeline,
+  redactSensitive,
+  summarizeRunForUser,
+} = require("../src/lib/integrationObservability");
+const {
+  createMemoryStore,
+  handleComposioWebhook,
+  handleHeartbeatIngest,
+  handleMobileSync,
+  handleStatusRead,
+  handleTriggerDispatch,
+} = require("../src/lib/integrationHandlers");
 
 const googleOAuthPatterns = [
   /^@react-native-google-signin\//i,
@@ -2240,6 +2308,682 @@ async function verifyEnrichReceiptModule() {
   });
 }
 
+function verifyIntegrationRoadmap() {
+  const roadmap = fs.readFileSync("docs/integration-roadmap.md", "utf8");
+
+  assert.match(roadmap, /current MVP remains/);
+  assert.match(
+    roadmap,
+    /Provider-specific account records are intentionally excluded/,
+  );
+  assert.match(roadmap, /Default runtime is Supabase-only/);
+  assert.match(roadmap, /Composio and MCP are backend adapters/);
+  assert.match(roadmap, /Mobile bundle\/env audit/);
+}
+
+async function verifyIntegrationBackendClientModule() {
+  const explicit = getIntegrationBackendConfig({
+    EXPO_PUBLIC_STRUCTLY_FUNCTIONS_URL: "https://api.structly.app/functions",
+  });
+  const derived = getIntegrationBackendConfig({
+    EXPO_PUBLIC_SUPABASE_URL: "https://project.supabase.co/",
+  });
+  const missing = getIntegrationBackendConfig({});
+
+  assert.equal(explicit.functionsUrl, "https://api.structly.app/functions");
+  assert.equal(
+    derived.functionsUrl,
+    "https://project.supabase.co/functions/v1",
+  );
+  assert.equal(missing.functionsUrl, null);
+  assert.equal(missing.error, "Structly backend is not configured.");
+  assert.equal(
+    buildFunctionUrl(derived, "heartbeat-ingest"),
+    "https://project.supabase.co/functions/v1/heartbeat-ingest",
+  );
+  assert.deepEqual(
+    createIntegrationHeaders({
+      anonKey: "anon",
+      session: { access_token: "user-token" },
+    }),
+    {
+      Authorization: "Bearer user-token",
+      "Content-Type": "application/json",
+      apikey: "anon",
+    },
+  );
+
+  const calls = [];
+  const result = await callIntegrationFunction({
+    anonKey: "anon",
+    body: { ok: true },
+    config: derived,
+    fetchImpl: async (url, options) => {
+      calls.push({ options, url });
+      return {
+        ok: true,
+        async json() {
+          return { accepted: true };
+        },
+      };
+    },
+    functionName: "mobile-sync",
+    session: { access_token: "user-token" },
+  });
+
+  assert.equal(result.error, null);
+  assert.deepEqual(result.data, { accepted: true });
+  assert.equal(
+    calls[0].url,
+    "https://project.supabase.co/functions/v1/mobile-sync",
+  );
+  assert.equal(calls[0].options.headers.Authorization, "Bearer user-token");
+}
+
+function verifyIntegrationCapabilityHealthModule() {
+  const granted = getDefaultIntegrationHealth({
+    background: { configured: true, supported: true },
+    backend: { reachable: true },
+    calendarPermission: { granted: true },
+    locationPermission: { status: "granted" },
+    providerConfigured: true,
+  });
+  const denied = getDefaultIntegrationHealth({
+    backend: { reachable: false },
+    calendarPermission: { status: "denied" },
+    locationPermission: { granted: false },
+    providerConfigured: false,
+  });
+
+  assert.equal(granted.location, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(granted.calendar, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(granted.background, CAPABILITY_STATUS.CONSTRAINED);
+  assert.equal(granted.backend, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(granted.triggers, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(isIntegrationReady(granted), true);
+  assert.equal(denied.location, CAPABILITY_STATUS.DENIED);
+  assert.equal(denied.calendar, CAPABILITY_STATUS.DENIED);
+  assert.equal(denied.backend, CAPABILITY_STATUS.OFFLINE);
+  assert.equal(denied.triggers, CAPABILITY_STATUS.OFFLINE);
+  assert.equal(isIntegrationReady(denied), false);
+  assert.equal(
+    getBackendCapability({ stale: true }),
+    CAPABILITY_STATUS.STALE,
+  );
+  assert.equal(
+    getBackendCapability({ unauthorized: true }),
+    CAPABILITY_STATUS.DENIED,
+  );
+  assert.match(BACKGROUND_EXECUTION_NOTE, /best effort/i);
+  assert.doesNotMatch(BACKGROUND_EXECUTION_NOTE, /guaranteed/i);
+  assert.deepEqual(
+    getHealthRows(granted).map((row) => row.label),
+    ["Location", "Calendar", "Backend", "Triggers", "Background"],
+  );
+}
+
+function verifyHeartbeatClassificationModule() {
+  const now = Date.UTC(2026, 6, 9, 12, 0, 0);
+
+  assert.equal(
+    classifyHeartbeat({ lastSeenAt: now - 10_000, now }),
+    HEARTBEAT_STATUS.FRESH,
+  );
+  assert.equal(
+    classifyHeartbeat({ lastSeenAt: now - 100_000, now }),
+    HEARTBEAT_STATUS.STALE,
+  );
+  assert.equal(
+    classifyHeartbeat({ lastSeenAt: now - 400_000, now }),
+    HEARTBEAT_STATUS.FAILED,
+  );
+  assert.equal(classifyHeartbeat({ now }), HEARTBEAT_STATUS.UNKNOWN);
+  assert.equal(
+    classifyHeartbeat({ lastSeenAt: now + 1_000, now }),
+    HEARTBEAT_STATUS.UNKNOWN,
+  );
+  assert.equal(shouldSendHeartbeat({ lastSentAt: now - 10_000, now }), false);
+  assert.equal(shouldSendHeartbeat({ lastSentAt: now - 40_000, now }), true);
+  assert.equal(
+    createDeviceHeartbeat({
+      appState: "active",
+      deviceId: "device-1",
+      now,
+      platform: "ios",
+      userId: "user-1",
+    }).heartbeatType,
+    "device",
+  );
+  assert.equal(
+    createWorkerHeartbeat({ now, workerId: "worker-1" }).heartbeatType,
+    "worker",
+  );
+}
+
+function verifyTriggerLifecycleModule() {
+  const trigger = createTriggerDefinition({
+    id: "trigger-1",
+    name: "Receipt follow-up",
+    source: "backend_catalog",
+    type: "receipt_reviewed",
+    userId: "user-1",
+  });
+  const event = {
+    eventKey: "event-1",
+    source: "database",
+  };
+  const existingKeys = new Set([getEventDedupeKey(event)]);
+  const run = createTriggerRun({
+    action: "send_email",
+    event,
+    id: "run-1",
+    trigger,
+  });
+
+  assert.equal(trigger.status, TRIGGER_STATUS.ACTIVE);
+  assert.equal(getEventDedupeKey(event), "database:event-1");
+  assert.deepEqual(shouldEnqueueEvent(event, new Set()), {
+    enqueue: true,
+    key: "database:event-1",
+    reason: null,
+  });
+  assert.deepEqual(shouldEnqueueEvent(event, existingKeys), {
+    enqueue: false,
+    key: "database:event-1",
+    reason: "duplicate",
+  });
+  assert.equal(run.status, TRIGGER_RUN_STATUS.APPROVAL_REQUIRED);
+  assert.equal(approveTriggerRun(run, false).status, TRIGGER_RUN_STATUS.DENIED);
+  assert.equal(approveTriggerRun(run, false).details.externalActionReady, false);
+  assert.equal(approveTriggerRun(run, true).details.externalActionReady, true);
+  assert.equal(getTriggerDisplayStatus(trigger, [run]), "Needs approval");
+  assert.equal(createTriggerPayload(trigger).action, "create");
+  assert.equal(updateTriggerPayload(trigger, { name: "Updated" }).action, "update");
+  assert.equal(pauseTriggerPayload(trigger).action, "pause");
+  assert.equal(resumeTriggerPayload(trigger).action, "resume");
+  assert.equal(deleteTriggerPayload(trigger).action, "delete");
+  assert.deepEqual(
+    sanitizeTriggerPatch({
+      apiKey: "secret",
+      name: "Safe",
+      service_role: "service-secret",
+      token: "token",
+    }),
+    { name: "Safe" },
+  );
+}
+
+function verifyIntegrationDashboardModule() {
+  const unavailable = getDefaultTriggerDashboard({
+    backend: { reachable: true },
+    providerConfigured: false,
+    userId: "user-1",
+  });
+  const ready = getDefaultTriggerDashboard({
+    backend: { reachable: true },
+    providerConfigured: true,
+    userId: "user-1",
+  });
+
+  assert.equal(unavailable.provider.copy, "Connectors unavailable");
+  assert.equal(unavailable.triggerControls.canCreate, false);
+  assert.equal(unavailable.triggerListState, TRIGGER_LIST_STATE.LOADED);
+  assert.equal(ready.triggerControls.canCreate, true);
+  assert.equal(
+    getTriggerListState({ loading: true }),
+    TRIGGER_LIST_STATE.LOADING,
+  );
+  assert.equal(getTriggerListState({ error: true }), TRIGGER_LIST_STATE.ERROR);
+  assert.equal(getTriggerListState({ triggers: [] }), TRIGGER_LIST_STATE.EMPTY);
+  assert.ok(
+    unavailable.runHistory.some(
+      (run) => run.status === TRIGGER_RUN_STATUS.DEAD_LETTERED,
+    ),
+  );
+}
+
+function verifyComposioWebhookBackendOnlySource() {
+  const functionSource = fs.readFileSync(
+    "supabase/functions/composio-webhook/index.ts",
+    "utf8",
+  );
+  const appSource = fs.readFileSync("App.js", "utf8");
+  const envExample = fs.readFileSync(".env.example", "utf8");
+
+  assert.equal(
+    hasComposioSignature({ "x-composio-signature": "signature" }),
+    true,
+  );
+  const now = Date.UTC(2026, 6, 9, 12, 0, 0);
+  const freshTimestamp = Math.floor(now / 1000);
+
+  assert.deepEqual(
+    validateComposioWebhookEnvelope({
+      headers: {
+        "composio-timestamp": String(freshTimestamp),
+        "x-composio-signature": "signature",
+      },
+      now,
+      payload: { id: "evt-1", toolkit: "gmail", trigger_id: "trg-1" },
+    }).event,
+    {
+      eventKey: "evt-1",
+      payload: { id: "evt-1", toolkit: "gmail", trigger_id: "trg-1" },
+      provider: "composio",
+      source: "composio:gmail",
+      triggerId: "trg-1",
+    },
+  );
+  assert.equal(
+    validateComposioWebhookEnvelope({
+      headers: {
+        "composio-timestamp": String(freshTimestamp - 600),
+        "x-composio-signature": "signature",
+      },
+      now,
+      payload: { id: "evt-1" },
+    }).error,
+    "stale_timestamp",
+  );
+  assert.equal(normalizeComposioEvent({}).source, "composio");
+  assert.match(functionSource, /signatureHeaders/);
+  assert.match(functionSource, /hasReplayTimestamp/);
+  assert.match(functionSource, /timestampIsFresh/);
+  assert.match(functionSource, /integration_events/);
+  assert.match(functionSource, /invalid_signature/);
+  assert.match(functionSource, /eventKey/);
+  assert.doesNotMatch(appSource, /COMPOSIO|service_role|composio-webhook/i);
+  assert.doesNotMatch(envExample, /EXPO_PUBLIC_COMPOSIO|SERVICE_ROLE/i);
+}
+
+function verifyIntegrationHandlersBehavior() {
+  const now = Date.UTC(2026, 6, 9, 12, 0, 0);
+  const store = createMemoryStore({
+    triggers: [
+      createTriggerDefinition({
+        id: "trigger-1",
+        name: "Receipt follow-up",
+        source: "database",
+        type: "receipt_reviewed",
+        userId: "user-1",
+      }),
+      createTriggerDefinition({
+        id: "trigger-2",
+        name: "Receipt archive",
+        source: "database",
+        type: "receipt_reviewed",
+        userId: "user-1",
+      }),
+    ],
+  });
+
+  assert.equal(
+    handleHeartbeatIngest({
+      body: {
+        capabilities: { backend: "available" },
+        deviceId: "device-1",
+        platform: "ios",
+        userId: "user-1",
+      },
+      now,
+      store,
+      token: "user-token",
+    }).data.upserted,
+    "created",
+  );
+  assert.equal(
+    handleHeartbeatIngest({
+      body: {
+        deviceId: "device-1",
+        userId: "user-1",
+      },
+      now: now + 1000,
+      store,
+      token: "user-token",
+    }).data.upserted,
+    "updated",
+  );
+  assert.equal(store.deviceHeartbeats.length, 1);
+  assert.equal(
+    handleHeartbeatIngest({
+      body: { workerId: "worker-1", userId: "user-1" },
+      now,
+      store,
+      token: "user-token",
+    }).data.status,
+    HEARTBEAT_STATUS.FRESH,
+  );
+
+  const dispatch = handleTriggerDispatch({
+    body: {
+      action: "send_email",
+      eventKey: "event-1",
+      eventType: "receipt_reviewed",
+      source: "database",
+      triggerId: "trigger-1",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "user-token",
+  });
+  const duplicateDispatch = handleTriggerDispatch({
+    body: {
+      action: "send_email",
+      eventKey: "event-1",
+      eventType: "receipt_reviewed",
+      source: "database",
+      triggerId: "trigger-1",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "user-token",
+  });
+  const fanoutDispatch = handleTriggerDispatch({
+    body: {
+      action: "record_event",
+      eventKey: "event-1",
+      eventType: "receipt_reviewed",
+      source: "database",
+      triggerId: "trigger-2",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "user-token",
+  });
+
+  assert.equal(dispatch.status, 200);
+  assert.equal(dispatch.data.run.status, TRIGGER_RUN_STATUS.APPROVAL_REQUIRED);
+  assert.equal(duplicateDispatch.data.deduped, true);
+  assert.equal(fanoutDispatch.status, 200);
+  assert.equal(fanoutDispatch.data.deduped, false);
+  assert.equal(fanoutDispatch.data.run.triggerId, "trigger-2");
+  assert.equal(store.integrationEvents.length, 1);
+  assert.equal(store.triggerRuns.length, 2);
+
+  const staleWebhook = handleComposioWebhook({
+    body: { id: "evt-stale", toolkit: "gmail" },
+    headers: {
+      "composio-timestamp": String(Math.floor(now / 1000) - 600),
+      "x-composio-signature": "signature",
+    },
+    now,
+    store,
+  });
+  const validWebhook = handleComposioWebhook({
+    body: {
+      action: "record_event",
+      id: "evt-2",
+      toolkit: "gmail",
+      trigger_id: "trigger-1",
+      user_id: "user-1",
+    },
+    headers: {
+      "composio-timestamp": String(Math.floor(now / 1000)),
+      "x-composio-signature": "signature",
+    },
+    now,
+    store,
+  });
+  const repeatedWebhook = handleComposioWebhook({
+    body: {
+      action: "record_event",
+      id: "evt-2",
+      toolkit: "gmail",
+      trigger_id: "trigger-1",
+      user_id: "user-1",
+    },
+    headers: {
+      "composio-timestamp": String(Math.floor(now / 1000)),
+      "x-composio-signature": "signature",
+    },
+    now,
+    store,
+  });
+
+  assert.equal(staleWebhook.status, 401);
+  assert.equal(staleWebhook.data.error, "stale_timestamp");
+  assert.equal(validWebhook.status, 200);
+  assert.equal(repeatedWebhook.data.deduped, true);
+  assert.equal(
+    handleTriggerDispatch({
+      body: { eventKey: "missing-source", triggerId: "trigger-1", userId: "user-1" },
+      now,
+      store,
+      token: "user-token",
+    }).status,
+    400,
+  );
+  assert.equal(
+    handleTriggerDispatch({
+      body: { eventKey: "event-auth", source: "database" },
+      now,
+      store,
+      token: null,
+    }).status,
+    401,
+  );
+
+  const status = handleStatusRead({
+    now,
+    store,
+    token: "user-token",
+    userId: "user-1",
+  });
+  const sync = handleMobileSync({
+    store,
+    token: "user-token",
+    userId: "user-1",
+  });
+
+  assert.equal(status.data.backend, "available");
+  assert.equal(status.data.bridge, "available");
+  assert.equal(status.data.runCount, 3);
+  assert.equal(status.data.workerHeartbeat, HEARTBEAT_STATUS.FRESH);
+  assert.equal(sync.data.triggerDefinitions.length, 2);
+  assert.equal(sync.data.runHistory.length, 3);
+}
+
+function verifyMcpBridgeBackendOnlySource() {
+  const functionSource = fs.readFileSync(
+    "supabase/functions/mcp-bridge/index.ts",
+    "utf8",
+  );
+  const appSource = fs.readFileSync("App.js", "utf8");
+
+  assert.deepEqual(
+    assertMobileSafeMcpServer({
+      transport: MCP_TRANSPORT.STREAMABLE_HTTP,
+      url: "https://mcp.example.com",
+    }),
+    { ok: true, reason: null },
+  );
+  assert.equal(
+    assertMobileSafeMcpServer({ transport: MCP_TRANSPORT.STDIO }).reason,
+    "stdio_not_supported_on_mobile",
+  );
+  assert.deepEqual(
+    getMobileSafeToolCatalog(
+      [
+        { description: "Allowed", inputSchema: { type: "object" }, name: "safe" },
+        { name: "blocked" },
+      ],
+      ["safe"],
+    ),
+    [{ description: "Allowed", inputSchema: { type: "object" }, name: "safe" }],
+  );
+  assert.deepEqual(
+    buildMcpToolInvocation({
+      arguments: { id: "receipt-1" },
+      serverId: "server-1",
+      toolName: "safe",
+    }),
+    {
+      arguments: { id: "receipt-1" },
+      serverId: "server-1",
+      toolName: "safe",
+      transport: MCP_TRANSPORT.STREAMABLE_HTTP,
+    },
+  );
+  assert.match(functionSource, /streamable_http/);
+  assert.match(functionSource, /remote_http_required/);
+  assert.match(functionSource, /missing_auth/);
+  assert.doesNotMatch(functionSource, /stdio/);
+  assert.doesNotMatch(appSource, /@modelcontextprotocol|stdio|MCP_API_KEY/);
+}
+
+function verifyObservabilityAndRedactionSource() {
+  const redacted = redactSensitive({
+    access_token: "token",
+    nested: {
+      preciseLocation: "51.5,-0.1",
+      receiptText: "full receipt",
+    },
+    safe: "ok",
+    service_role: "service",
+  });
+  const audit = buildAuditEvent({
+    action: "trigger.run",
+    eventId: "event-1",
+    runId: "run-1",
+    status: "succeeded",
+  });
+
+  assert.equal(redacted.access_token, "[redacted]");
+  assert.equal(redacted.service_role, "[redacted]");
+  assert.equal(redacted.nested.preciseLocation, "[redacted]");
+  assert.equal(redacted.nested.receiptText, "[redacted]");
+  assert.equal(redacted.safe, "ok");
+  assert.equal(audit.terminal, true);
+  assert.equal(audit.eventId, "event-1");
+  assert.deepEqual(
+    buildHealthSummary({
+      bridge: "available",
+      cron: "fresh",
+      realtime: "available",
+      webhook: "available",
+      workerHeartbeat: "fresh",
+    }),
+    {
+      bridge: "available",
+      cron: "fresh",
+      realtime: "available",
+      webhook: "available",
+      workerHeartbeat: "fresh",
+    },
+  );
+  assert.equal(buildRunTimeline({ status: "succeeded" }).length, 2);
+  assert.equal(
+    summarizeRunForUser({ status: "approval_required" }),
+    "Needs your approval.",
+  );
+}
+
+function verifySupabaseIntegrationSources() {
+  const migrationFiles = fs
+    .readdirSync("supabase/migrations")
+    .filter((name) => name.endsWith(".sql"));
+  const migration = migrationFiles
+    .map((name) => fs.readFileSync(`supabase/migrations/${name}`, "utf8"))
+    .join("\n");
+  const functions = [
+    "mobile-sync",
+    "heartbeat-ingest",
+    "trigger-dispatch",
+    "status-read",
+    "composio-webhook",
+    "mcp-bridge",
+  ];
+
+  assert.ok(migrationFiles.length > 0);
+  for (const table of [
+    "integration_events",
+    "trigger_definitions",
+    "trigger_runs",
+    "device_heartbeats",
+    "worker_heartbeats",
+    "integration_audit_logs",
+    "dead_letter_events",
+  ]) {
+    assert.match(
+      migration,
+      new RegExp(`create table if not exists public\\.${table}`),
+    );
+    assert.match(
+      migration,
+      new RegExp(`alter table public\\.${table} enable row level security`),
+    );
+  }
+  assert.match(migration, /auth\.uid\(\) = user_id/);
+  assert.match(migration, /auth\.role\(\) = 'authenticated'/);
+  assert.match(migration, /unique \(source, event_key\)/);
+  assert.match(migration, /unique \(trigger_id, idempotency_key\)/);
+  assert.doesNotMatch(migration, /connector_accounts/);
+  assert.match(
+    fs.readFileSync("supabase/config.toml", "utf8"),
+    /\[realtime\]\nenabled = true/,
+  );
+  for (const functionName of functions) {
+    assert.ok(fs.existsSync(`supabase/functions/${functionName}/index.ts`));
+  }
+  assert.match(
+    fs.readFileSync("supabase/functions/trigger-dispatch/index.ts", "utf8"),
+    /integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
+  );
+  const heartbeatSource = fs.readFileSync(
+    "supabase/functions/heartbeat-ingest/index.ts",
+    "utf8",
+  );
+  assert.match(heartbeatSource, /device_heartbeats/);
+  assert.match(heartbeatSource, /worker_heartbeats/);
+  assert.match(heartbeatSource, /resolution=merge-duplicates/);
+  const statusReadSource = fs.readFileSync(
+    "supabase/functions/status-read/index.ts",
+    "utf8",
+  );
+  assert.match(statusReadSource, /trigger_runs[\s\S]*worker_heartbeats/);
+  assert.match(statusReadSource, /integration_sources/);
+  assert.match(statusReadSource, /trigger_definitions/);
+  assert.match(statusReadSource, /bridge,/);
+}
+
+function verifyIntegrationUiSource() {
+  const appSource = fs.readFileSync("App.js", "utf8");
+  const dashboardSource = fs.readFileSync(
+    "src/lib/integrationDashboard.js",
+    "utf8",
+  );
+
+  assert.match(appSource, /Integration health/);
+  assert.match(appSource, /callIntegrationFunction/);
+  assert.match(appSource, /functionName: "status-read"/);
+  assert.match(appSource, /providerConfigured: data\.bridge === "available"/);
+  assert.match(appSource, /setBackendStatus/);
+  assert.match(appSource, /getDefaultTriggerDashboard/);
+  assert.match(appSource, /getHealthRows/);
+  assert.match(appSource, /Connector status/);
+  assert.match(appSource, /Trigger list/);
+  assert.match(appSource, /Catalog source: backend/);
+  assert.match(appSource, /Create trigger/);
+  assert.match(appSource, /Edit/);
+  assert.match(appSource, /Pause/);
+  assert.match(appSource, /Resume/);
+  assert.match(appSource, /Delete/);
+  assert.match(appSource, /Run history/);
+  assert.match(appSource, /run\.status/);
+  assert.match(dashboardSource, /APPROVAL_REQUIRED/);
+  assert.match(dashboardSource, /SUCCEEDED/);
+  assert.match(dashboardSource, /RETRYING/);
+  assert.match(dashboardSource, /FAILED/);
+  assert.match(dashboardSource, /DEAD_LETTERED/);
+  assert.doesNotMatch(
+    appSource,
+    /OpenClaw|Hermes|gateway token|worker implementation/i,
+  );
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -2259,6 +3003,18 @@ async function main() {
   await verifyLocationContextModule();
   await verifyCalendarContextModule();
   await verifyEnrichReceiptModule();
+  verifyIntegrationRoadmap();
+  await verifyIntegrationBackendClientModule();
+  verifyIntegrationCapabilityHealthModule();
+  verifyHeartbeatClassificationModule();
+  verifyTriggerLifecycleModule();
+  verifyIntegrationDashboardModule();
+  verifyIntegrationHandlersBehavior();
+  verifyComposioWebhookBackendOnlySource();
+  verifyMcpBridgeBackendOnlySource();
+  verifyObservabilityAndRedactionSource();
+  verifySupabaseIntegrationSources();
+  verifyIntegrationUiSource();
   console.log("Acceptance checks passed.");
 }
 

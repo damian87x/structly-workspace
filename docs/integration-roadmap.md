@@ -1,0 +1,57 @@
+# Structly Integration Roadmap
+
+Structly's current MVP remains a receipt capture, review, enrichment, and export app. The MVP does not require OAuth connectors, third-party action execution, or model/tool code execution on the device.
+
+This roadmap defines the gated path for backend-owned integrations after the MVP path remains green.
+
+## Phase 0 - Protect The MVP
+
+- Receipt capture, review, context enrichment, and export remain available even when backend integration health is stale or offline.
+- Mobile provider secrets are not allowed in `EXPO_PUBLIC_*` values, mobile source, logs, or bundled JavaScript.
+- Integration surfaces default to unavailable until the backend reports a configured provider.
+- User-facing copy uses product language such as "automation", "connector", "run history", and "worker status".
+
+## Phase 1 - Backend Substrate
+
+The first backend tranche is provider-neutral:
+
+- receipt jobs
+- integration events
+- trigger definitions and trigger runs
+- device and worker heartbeats
+- audit logs and dead-letter events
+- optional integration source/capability registry
+
+Provider-specific account records are intentionally excluded from this phase. They belong to later Composio or MCP adapter work.
+
+Default runtime is Supabase-only: Postgres, RLS, Storage, Edge Functions, Cron, and Realtime. A separate Node/Fastify service requires a recorded runtime decision with evidence that Edge Functions are not sufficient.
+
+## Phase 2 - Mobile Health And Sync
+
+Mobile owns consent and status display:
+
+- location/calendar capability states
+- background-task support reported as best-effort, never guaranteed
+- app/device heartbeat emission while foregrounded or resumed
+- offline/stale backend states
+- trigger and run-history views backed by durable backend state
+
+Backend automation must continue without the mobile app running.
+
+## Phase 3 - Provider Adapters
+
+Composio and MCP are backend adapters:
+
+- Composio events enter through signed backend webhooks.
+- MCP tools are exposed through a backend bridge and approved catalog.
+- Mobile sees only approved catalogs, statuses, approvals, and histories.
+- External side effects require policy checks and, when configured, user approval.
+
+## Release Gates
+
+- `npm test` passes.
+- `npm run audit:oauth` passes.
+- RLS/auth checks prove user isolation.
+- Signed webhook, replay, idempotency, and dead-letter paths are tested.
+- Mobile bundle/env audit shows no provider or service-role secrets.
+- Real-device checks cover permission grant, denial, revoke, background, killed app, offline, and resume.
