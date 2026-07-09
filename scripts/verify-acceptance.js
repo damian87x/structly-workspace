@@ -3302,8 +3302,13 @@ function verifyE2EHarnessSource() {
     "scripts/verify-live-integrations.js",
     "utf8",
   );
+  const pixelSmokeSource = fs.readFileSync(
+    "scripts/verify-pixel-device.js",
+    "utf8",
+  );
   const ciDocs = fs.readFileSync("docs/mobile-integration-ci.md", "utf8");
   const liveSmokeDocs = fs.readFileSync("docs/live-integration-smoke.md", "utf8");
+  const pixelSmokeDocs = fs.readFileSync("docs/pixel-device-smoke.md", "utf8");
   const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
   assert.equal(pkg.scripts["test:ci"], "npm run test:all");
@@ -3312,6 +3317,7 @@ function verifyE2EHarnessSource() {
     "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
   );
   assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");
+  assert.equal(pkg.scripts["test:pixel"], "node scripts/verify-pixel-device.js");
   assert.equal(
     pkg.scripts["test:all"],
     "npm test && npm run audit:oauth && npm run test:e2e",
@@ -3333,6 +3339,11 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyCodeExecution/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
   assert.match(liveSmokeSource, /--require-live/);
+  assert.match(pixelSmokeSource, /adb/);
+  assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
+  assert.match(pixelSmokeSource, /--require-device/);
+  assert.match(pixelSmokeSource, /--require-install/);
+  assert.match(pixelSmokeSource, /ro\.product\.model/);
   assert.match(ciDocs, /npm run test:ci/);
   assert.match(ciDocs, /actions\/checkout@v5/);
   assert.match(ciDocs, /actions\/setup-node@v6/);
@@ -3340,6 +3351,9 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeDocs, /npm run test:live/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
+  assert.match(pixelSmokeDocs, /npm run test:pixel/);
+  assert.match(pixelSmokeDocs, /Google Pixel/);
+  assert.match(pixelSmokeDocs, /STRUCTLY_ANDROID_PACKAGE/);
 }
 
 async function main() {

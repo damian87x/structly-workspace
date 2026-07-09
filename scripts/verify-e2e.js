@@ -100,6 +100,7 @@ function verifyStaticE2EContracts() {
   );
   assert.equal(pkg.scripts["test:ci"], "npm run test:all");
   assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");
+  assert.equal(pkg.scripts["test:pixel"], "node scripts/verify-pixel-device.js");
   assert.equal(
     pkg.scripts["test:all"],
     "npm test && npm run audit:oauth && npm run test:e2e",
