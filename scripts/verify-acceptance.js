@@ -3298,8 +3298,10 @@ function verifyE2EHarnessSource() {
     "scripts/verify-edge-functions.js",
     "utf8",
   );
+  const ciDocs = fs.readFileSync("docs/mobile-integration-ci.md", "utf8");
   const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
+  assert.equal(pkg.scripts["test:ci"], "npm run test:all");
   assert.equal(
     pkg.scripts["test:e2e"],
     "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
@@ -3319,6 +3321,10 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
+  assert.match(ciDocs, /npm run test:ci/);
+  assert.match(ciDocs, /actions\/checkout@v5/);
+  assert.match(ciDocs, /actions\/setup-node@v6/);
+  assert.match(ciDocs, /workflow` scope/);
 }
 
 async function main() {
