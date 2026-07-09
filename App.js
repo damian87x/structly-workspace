@@ -612,7 +612,11 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
 
     try {
       const result = await exportReviewedReceipts(reviewedReceipts);
-      setExportResult(result.exportResult);
+      setExportResult({
+        ...result.exportResult,
+        handoffNote: result.handoffNote,
+        summary: result.summary,
+      });
     } catch (error) {
       setExportError("Unable to export reviewed receipts.");
     } finally {
@@ -816,6 +820,14 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           </Pressable>
           {exportResult?.uri ? (
             <Text style={styles.panelMeta}>Exported: {exportResult.uri}</Text>
+          ) : null}
+          {exportResult?.handoffNote ? (
+            <View style={styles.handoffNote}>
+              <Text style={styles.panelTitle}>Accountant handoff</Text>
+              <Text selectable style={styles.panelMeta}>
+                {exportResult.handoffNote}
+              </Text>
+            </View>
           ) : null}
           {exportError ? <Text style={styles.error}>{exportError}</Text> : null}
         </View>
@@ -1265,6 +1277,13 @@ const styles = StyleSheet.create({
   header: {
     gap: 8,
     marginBottom: 36,
+  },
+  handoffNote: {
+    borderTopColor: "#E5E7EB",
+    borderTopWidth: 1,
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 12,
   },
   input: {
     backgroundColor: "#FFFFFF",

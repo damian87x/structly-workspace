@@ -21,6 +21,7 @@ const {
   enrichReceipt,
 } = require("../src/lib/enrichReceipt");
 const {
+  buildHandoffNote,
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
 const { exportSheet } = require("../src/lib/exportShare");
@@ -250,6 +251,8 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /fieldRow\.displayValue/);
   assert.match(appSource, /Extracting receipt fields/);
   assert.match(appSource, /exportReviewedReceipts/);
+  assert.match(appSource, /Accountant handoff/);
+  assert.match(appSource, /handoffNote/);
   assert.ok(
     appSource.includes('import { applyCorrection } from "./src/lib/reviewQueue";'),
   );
@@ -1257,6 +1260,7 @@ async function verifyExportReviewedReceiptsHelper() {
   };
   const receipts = [
     {
+      sourceUri: "file://reviewed-market.jpg",
       fields: {
         category: "Office",
         date: "2026-07-07",
@@ -1271,6 +1275,7 @@ async function verifyExportReviewedReceiptsHelper() {
       },
     },
     {
+      sourceUri: "file://review-cafe.jpg",
       fields: {
         category: "Meals",
         date: "2026-07-08",
@@ -1291,6 +1296,31 @@ async function verifyExportReviewedReceiptsHelper() {
     "Review Cafe,2026-07-08,10,2,13.5,Meals,,",
   ].join("\n");
   const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
+  const expectedHandoffNote = [
+    "Structly receipt pack handoff",
+    "",
+    "Status: Needs review",
+    "Rows: 2",
+    "Rows with source proof: 2/2",
+    "Gross total: 37.50",
+    "Net total: 30.00",
+    "VAT total: 6.00",
+    "",
+    "Blockers:",
+    "- 1 row needs review",
+    "",
+    "Category totals:",
+    "- Office: 1 row, gross 24.00",
+    "- Meals: 1 row, gross 13.50",
+    "",
+    "Billable clients:",
+    "- None",
+    "",
+    "Locations:",
+    "- None",
+    "",
+    "Review any blockers before filing or sending this pack to an accountant.",
+  ].join("\n");
   const writes = [];
   const shares = [];
   const result = await exportReviewedReceipts(receipts, {
@@ -1305,6 +1335,7 @@ async function verifyExportReviewedReceiptsHelper() {
 
   assert.deepEqual(writes, [{ contents: expectedCsv, uri: expectedUri }]);
   assert.deepEqual(shares, [expectedUri]);
+  assert.equal(result.handoffNote, expectedHandoffNote);
   assert.equal(result.sheet.csv, expectedCsv);
   assert.equal(result.sheet.validation.needsReviewCount, 1);
   assert.deepEqual(result.summary, {
@@ -1334,6 +1365,7 @@ async function verifyExportReviewedReceiptsHelper() {
     totalVat: 6,
   });
   assert.deepEqual(result.exportResult, { shared: true, uri: expectedUri });
+  assert.equal(buildHandoffNote(receipts, result.sheet), expectedHandoffNote);
 
   const exportCalls = [];
   const injectedResult = await exportReviewedReceipts(receipts, {
@@ -1356,6 +1388,7 @@ async function verifyExportReviewedReceiptsHelper() {
   assert.equal(typeof exportCalls[0].dependencies.share, "function");
   assert.equal(typeof exportCalls[0].dependencies.writeFile, "function");
   assert.equal(injectedResult.summary.rowCount, 2);
+  assert.equal(injectedResult.handoffNote, expectedHandoffNote);
   assert.equal(injectedResult.exportResult.uri, "file:///tmp/custom/fake.csv");
 }
 
