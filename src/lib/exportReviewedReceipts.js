@@ -67,6 +67,8 @@ function buildHandoffNote(receipts, sheet) {
     `Rows: ${summary.rowCount}`,
     `Period: ${summary.period?.label || "No dated rows"}`,
     `Rows with source proof: ${summary.sourceProofCount}/${summary.rowCount}`,
+    `Rows with business purpose: ${summary.businessPurposeCount || 0}/${summary.rowCount}`,
+    `Rows with payment method: ${summary.paymentMethodCount || 0}/${summary.rowCount}`,
     `Gross total: ${formatMoney(summary.totalGross)}`,
     `Net total: ${formatMoney(summary.totalNet)}`,
     `VAT total: ${formatMoney(summary.totalVat)}`,

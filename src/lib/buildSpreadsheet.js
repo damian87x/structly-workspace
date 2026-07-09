@@ -1,7 +1,13 @@
 const FIELD_COLUMNS = ["vendor", "date", "net", "vat", "gross", "category"];
 const CONTEXT_COLUMNS = ["location", "billable_client"];
+const REPORT_COLUMNS = ["business_purpose", "payment_method"];
 const AUDIT_COLUMNS = ["source_uri", "review_status", "review_reasons"];
-const COLUMNS = [...FIELD_COLUMNS, ...CONTEXT_COLUMNS, ...AUDIT_COLUMNS];
+const COLUMNS = [
+  ...FIELD_COLUMNS,
+  ...CONTEXT_COLUMNS,
+  ...REPORT_COLUMNS,
+  ...AUDIT_COLUMNS,
+];
 const HEADER_ROW = COLUMNS.join(",");
 const READY_STATUS = {
   EMPTY: "empty",
@@ -61,6 +67,52 @@ function getIssues(receipt) {
 
 function getSourceUri(receipt) {
   return receipt?.sourceUri || receipt?.imageUri || receipt?.uri || null;
+}
+
+function getTextValue(...values) {
+  for (const value of values) {
+    const normalized = normalizeKeyPart(value);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function getBusinessPurpose(receipt) {
+  const fields = getFields(receipt);
+  const context = getContext(receipt);
+  const billable = context.billable;
+  const billableClient = getTextValue(billable?.client);
+  const billableProject = getTextValue(billable?.project);
+
+  if (billable?.billable === true && (billableClient || billableProject)) {
+    return [billableClient, billableProject].filter(Boolean).join(" - ");
+  }
+
+  return getTextValue(
+    context.businessPurpose,
+    context.business_purpose,
+    fields.businessPurpose,
+    fields.business_purpose,
+    context.calendar?.title,
+    context.calendar?.summary,
+  );
+}
+
+function getPaymentMethod(receipt) {
+  const fields = getFields(receipt);
+  const context = getContext(receipt);
+
+  return getTextValue(
+    fields.paymentMethod,
+    fields.payment_method,
+    context.paymentMethod,
+    context.payment_method,
+    receipt?.paymentMethod,
+  );
 }
 
 function getIssueReason(issue) {
@@ -297,6 +349,14 @@ function buildSummary(receipts, validation) {
       const net = parseAmount(fields.net);
       const vat = parseAmount(fields.vat);
 
+      if (getBusinessPurpose(receipt)) {
+        currentTotals.businessPurposeCount += 1;
+      }
+
+      if (getPaymentMethod(receipt)) {
+        currentTotals.paymentMethodCount += 1;
+      }
+
       if (gross !== null) {
         currentTotals.totalGross += gross;
       }
@@ -329,6 +389,8 @@ function buildSummary(receipts, validation) {
       totalGross: 0,
       totalNet: 0,
       totalVat: 0,
+      businessPurposeCount: 0,
+      paymentMethodCount: 0,
     },
   );
   const blockers = [];
@@ -365,12 +427,14 @@ function buildSummary(receipts, validation) {
     billableTotals: buildBreakdownRows(billableMap, "billableClient"),
     blockerCount: blockers.length,
     blockers,
+    businessPurposeCount: totals.businessPurposeCount,
     categoryTotals: buildBreakdownRows(categoryMap, "category"),
     duplicateCount: validation.duplicateCount,
     locationTotals: buildBreakdownRows(locationMap, "location"),
     missingProofCount: validation.missingProofCount,
     needsReviewCount: validation.needsReviewCount,
     period,
+    paymentMethodCount: totals.paymentMethodCount,
     ready: receipts.length > 0 && blockers.length === 0,
     rowCount: receipts.length,
     sourceProofCount: receipts.length - validation.missingProofCount,
@@ -390,6 +454,10 @@ function buildCsv(receipts) {
   const rows = receipts.map((receipt) => {
     const fields = getFields(receipt);
     const contextFields = getContextFields(receipt);
+    const reportFields = {
+      business_purpose: getBusinessPurpose(receipt),
+      payment_method: getPaymentMethod(receipt),
+    };
     const issues = getIssues(receipt);
     const needsReview =
       Boolean(receipt?.validation?.needsReview) || issues.length > 0;
@@ -402,6 +470,7 @@ function buildCsv(receipts) {
     return [
       ...FIELD_COLUMNS.map((field) => escapeCsvCell(fields[field])),
       ...CONTEXT_COLUMNS.map((field) => escapeCsvCell(contextFields[field])),
+      ...REPORT_COLUMNS.map((field) => escapeCsvCell(reportFields[field])),
       ...AUDIT_COLUMNS.map((field) => escapeCsvCell(auditFields[field])),
     ].join(",");
   });

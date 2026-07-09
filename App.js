@@ -783,6 +783,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           </Text>
           <Text style={styles.panelMeta}>Period: {receiptSummary.period.label}</Text>
           <Text style={styles.panelMeta}>
+            Business purpose: {receiptSummary.businessPurposeCount}/{receiptSummary.rowCount}
+          </Text>
+          <Text style={styles.panelMeta}>
             Gross total: {formatMoney(receiptSummary.totalGross)}
           </Text>
           <Text style={styles.panelMeta}>

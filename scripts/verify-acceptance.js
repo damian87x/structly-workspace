@@ -266,6 +266,7 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Duplicates:/);
   assert.match(appSource, /Source proof:/);
   assert.match(appSource, /Period:/);
+  assert.match(appSource, /Business purpose:/);
   assert.match(appSource, /Gross total:/);
   assert.match(appSource, /VAT total:/);
   assert.match(appSource, /Top category:/);
@@ -958,6 +959,7 @@ function verifyBuildSpreadsheetModule() {
         date: "2026-07-01",
         gross: 12,
         net: 10,
+        paymentMethod: "Business card",
         vat: 2,
         vendor: "Acme Supplies",
       },
@@ -1012,10 +1014,10 @@ function verifyBuildSpreadsheetModule() {
   ]);
 
   assert.deepEqual(cleanSheet.csv.split("\n"), [
-    "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
-    "Acme Supplies,2026-07-01,10,2,12,Office,,,file://acme-supplies.jpg,ready,",
-    "Enriched Taxi,2026-07-03,15,3,18,Travel,Soho Market,Acme Ltd,file://enriched-taxi.jpg,ready,",
-    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team",,,file://comma-quote.jpg,ready,',
+    "vendor,date,net,vat,gross,category,location,billable_client,business_purpose,payment_method,source_uri,review_status,review_reasons",
+    "Acme Supplies,2026-07-01,10,2,12,Office,,,,Business card,file://acme-supplies.jpg,ready,",
+    "Enriched Taxi,2026-07-03,15,3,18,Travel,Soho Market,Acme Ltd,Acme Ltd - VAT review,,file://enriched-taxi.jpg,ready,",
+    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team",,,,,file://comma-quote.jpg,ready,',
   ]);
   assert.deepEqual(cleanSheet.validation.needsReviewRows, []);
   assert.deepEqual(cleanSheet.validation.duplicates, []);
@@ -1033,6 +1035,7 @@ function verifyBuildSpreadsheetModule() {
     ],
     blockerCount: 0,
     blockers: [],
+    businessPurposeCount: 1,
     categoryTotals: [
       {
         category: "Travel",
@@ -1066,6 +1069,7 @@ function verifyBuildSpreadsheetModule() {
       label: "2026-07",
       startDate: "2026-07-01",
     },
+    paymentMethodCount: 1,
     ready: true,
     rowCount: 3,
     sourceProofCount: 3,
@@ -1394,9 +1398,9 @@ async function verifyExportReviewedReceiptsHelper() {
     },
   ];
   const expectedCsv = [
-    "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
-    "Reviewed Market,2026-07-07,20,4,24,Office,,,file://reviewed-market.jpg,ready,",
-    "Review Cafe,2026-07-08,10,2,13.5,Meals,,,file://review-cafe.jpg,needs_review,net plus VAT does not equal gross.",
+    "vendor,date,net,vat,gross,category,location,billable_client,business_purpose,payment_method,source_uri,review_status,review_reasons",
+    "Reviewed Market,2026-07-07,20,4,24,Office,,,,,file://reviewed-market.jpg,ready,",
+    "Review Cafe,2026-07-08,10,2,13.5,Meals,,,,,file://review-cafe.jpg,needs_review,net plus VAT does not equal gross.",
   ].join("\n");
   const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
   const expectedHandoffNote = [
@@ -1406,6 +1410,8 @@ async function verifyExportReviewedReceiptsHelper() {
     "Rows: 2",
     "Period: 2026-07",
     "Rows with source proof: 2/2",
+    "Rows with business purpose: 0/2",
+    "Rows with payment method: 0/2",
     "Gross total: 37.50",
     "Net total: 30.00",
     "VAT total: 6.00",
@@ -1446,6 +1452,7 @@ async function verifyExportReviewedReceiptsHelper() {
     billableTotals: [],
     blockerCount: 1,
     blockers: ["1 row needs review"],
+    businessPurposeCount: 0,
     categoryTotals: [
       {
         category: "Office",
@@ -1468,6 +1475,7 @@ async function verifyExportReviewedReceiptsHelper() {
       label: "2026-07",
       startDate: "2026-07-07",
     },
+    paymentMethodCount: 0,
     ready: false,
     rowCount: 2,
     sourceProofCount: 2,
@@ -1712,6 +1720,8 @@ function verifyReceiptContextReviewHelper() {
     "Meals",
     "",
     "",
+    "Acme Ltd - VAT review",
+    "",
     "",
     "ready",
     "",
@@ -1761,6 +1771,8 @@ function verifyReceiptContextReviewHelper() {
     "24",
     "Meals",
     "",
+    "",
+    "Acme Ltd - VAT review",
     "",
     "",
     "ready",
@@ -1926,9 +1938,9 @@ async function verifyReceiptPipelineModule() {
     assert.deepEqual(result.failures[0].image, images[2]);
     assert.equal(result.failures[0].error.message, "Vision extraction failed.");
     assert.deepEqual(result.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
-      "Clean Market,2026-07-05,20,4,24,Office,,,file://clean.jpg,ready,",
-      "Review Cafe,2026-07-06,10,2,13.5,Meals,,,file://flagged.jpg,needs_review,net plus VAT does not equal gross.",
+      "vendor,date,net,vat,gross,category,location,billable_client,business_purpose,payment_method,source_uri,review_status,review_reasons",
+      "Clean Market,2026-07-05,20,4,24,Office,,,,,file://clean.jpg,ready,",
+      "Review Cafe,2026-07-06,10,2,13.5,Meals,,,,,file://flagged.jpg,needs_review,net plus VAT does not equal gross.",
     ]);
     assert.equal(result.sheet.validation.needsReviewCount, 1);
     assert.deepEqual(result.sheet.validation.needsReviewRows, [
@@ -2587,8 +2599,8 @@ async function verifyEnrichReceiptModule() {
     assert.equal(pipelineResult.receipts.length, 1);
     assert.equal(pipelineResult.failures.length, 0);
     assert.deepEqual(pipelineResult.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
-      "Pipeline Cafe,2026-07-08,20,4,24,Meals,,,file://pipeline-enrichment.jpg,ready,",
+      "vendor,date,net,vat,gross,category,location,billable_client,business_purpose,payment_method,source_uri,review_status,review_reasons",
+      "Pipeline Cafe,2026-07-08,20,4,24,Meals,,,,,file://pipeline-enrichment.jpg,ready,",
     ]);
     assert.equal(pipelineResult.sheet.validation.needsReviewCount, 0);
     assert.equal(await pendingEnrichment, pipelineReceipt);
