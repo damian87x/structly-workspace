@@ -2353,6 +2353,7 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /Daytona-style code execution/);
   assert.match(roadmap, /foreground\/resume device heartbeats/);
   assert.match(roadmap, /user-scoped mobile sync/);
+  assert.match(roadmap, /trigger create\/edit\/pause\/resume\/delete/);
   assert.match(roadmap, /npm run test:e2e/);
   assert.match(roadmap, /Mobile bundle\/env audit/);
   assert.match(pixelPlan, /Pixel device/);
@@ -3261,6 +3262,7 @@ function verifySupabaseIntegrationSources() {
   const functions = [
     "mobile-sync",
     "heartbeat-ingest",
+    "trigger-actions",
     "trigger-dispatch",
     "status-read",
     "composio-webhook",
@@ -3317,6 +3319,16 @@ function verifySupabaseIntegrationSources() {
     fs.readFileSync("supabase/functions/trigger-dispatch/index.ts", "utf8"),
     /integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
   );
+  const triggerActionSource = fs.readFileSync(
+    "supabase/functions/trigger-actions/index.ts",
+    "utf8",
+  );
+  assert.match(triggerActionSource, /auth\/v1\/user/);
+  assert.match(triggerActionSource, /allowedActions/);
+  assert.match(triggerActionSource, /allowedPatchKeys/);
+  assert.match(triggerActionSource, /trigger_definitions/);
+  assert.match(triggerActionSource, /user_id=eq\.\$\{userFilter\}/);
+  assert.match(triggerActionSource, /status: "deleted"/);
   const heartbeatSource = fs.readFileSync(
     "supabase/functions/heartbeat-ingest/index.ts",
     "utf8",
@@ -3385,8 +3397,14 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /functionName: "status-read"/);
   assert.match(appSource, /functionName: "heartbeat-ingest"/);
   assert.match(appSource, /functionName: "mobile-sync"/);
+  assert.match(appSource, /functionName: "trigger-actions"/);
   assert.match(appSource, /createMobileDeviceHeartbeatPayload/);
   assert.match(appSource, /shouldSendHeartbeat/);
+  assert.match(appSource, /handleTriggerAction/);
+  assert.match(appSource, /createTriggerPayload/);
+  assert.match(appSource, /pauseTriggerPayload/);
+  assert.match(appSource, /resumeTriggerPayload/);
+  assert.match(appSource, /deleteTriggerPayload/);
   assert.match(appSource, /integrationSync/);
   assert.match(appSource, /triggerDefinitions/);
   assert.match(appSource, /runHistory/);
@@ -3456,6 +3474,7 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /vm\.runInNewContext/);
   assert.match(edgeHarnessSource, /verifyMobileSyncFunction/);
   assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
+  assert.match(edgeHarnessSource, /verifyTriggerActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);

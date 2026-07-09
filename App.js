@@ -39,6 +39,13 @@ import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
 import { createMobileDeviceHeartbeatPayload } from "./src/lib/mobileIntegrationRuntime";
 import {
+  createTriggerPayload,
+  deleteTriggerPayload,
+  pauseTriggerPayload,
+  resumeTriggerPayload,
+  updateTriggerPayload,
+} from "./src/lib/triggers";
+import {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
   getReceiptContextDisplay,
@@ -47,11 +54,11 @@ import {
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
 const INTEGRATION_CONTROL_ROWS = [
-  ["Create trigger", "canCreate"],
-  ["Edit", "canEdit"],
-  ["Pause", "canPause"],
-  ["Resume", "canResume"],
-  ["Delete", "canDelete"],
+  ["Create trigger", "create", "canCreate"],
+  ["Edit", "update", "canEdit"],
+  ["Pause", "pause", "canPause"],
+  ["Resume", "resume", "canResume"],
+  ["Delete", "delete", "canDelete"],
 ];
 
 function formatFieldValue(value) {
@@ -230,9 +237,12 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [exportResult, setExportResult] = useState(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isTriggerActionRunning, setIsTriggerActionRunning] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
+  const [triggerActionError, setTriggerActionError] = useState(null);
+  const [triggerActionMessage, setTriggerActionMessage] = useState(null);
   const [backendStatus, setBackendStatus] = useState({
     codeExecutionConfigured: false,
     providerConfigured: false,
@@ -280,6 +290,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     [backendStatus, email, integrationSync],
   );
   const integrationHealthRows = getHealthRows(integrationDashboard.health);
+  const selectedTrigger = integrationDashboard.triggers[0] || null;
   const needsReviewRow = receiptSheet.validation.needsReviewRows[0] || null;
   const reviewReceipt = needsReviewRow
     ? reviewedReceipts[needsReviewRow.index]
@@ -559,6 +570,102 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     }
   }
 
+  async function refreshSyncedTriggers() {
+    const syncResult = await callIntegrationFunction({
+      anonKey,
+      body: {},
+      config: backendConfig,
+      functionName: "mobile-sync",
+      session,
+    });
+
+    if (syncResult.error || !syncResult.data) {
+      setIntegrationSync((currentSync) => ({
+        ...currentSync,
+        error: true,
+        loading: false,
+      }));
+      return;
+    }
+
+    setIntegrationSync({
+      error: false,
+      hydrated: true,
+      loading: false,
+      runHistory: syncResult.data.runHistory || [],
+      triggerDefinitions: syncResult.data.triggerDefinitions || [],
+    });
+  }
+
+  function getTriggerActionPayload(action) {
+    if (action === "create") {
+      return createTriggerPayload({
+        name: "Receipt follow-up",
+        source: "backend_catalog",
+        type: "receipt_reviewed",
+        userId: session?.user?.id || email,
+      });
+    }
+
+    if (!selectedTrigger) {
+      return null;
+    }
+
+    if (action === "update") {
+      return updateTriggerPayload(selectedTrigger, {
+        name: selectedTrigger.name || "Receipt follow-up",
+      });
+    }
+
+    if (action === "pause") {
+      return pauseTriggerPayload(selectedTrigger);
+    }
+
+    if (action === "resume") {
+      return resumeTriggerPayload(selectedTrigger);
+    }
+
+    if (action === "delete") {
+      return deleteTriggerPayload(selectedTrigger);
+    }
+
+    return null;
+  }
+
+  async function handleTriggerAction(action) {
+    const payload = getTriggerActionPayload(action);
+
+    if (!payload || isTriggerActionRunning) {
+      return;
+    }
+
+    setTriggerActionError(null);
+    setTriggerActionMessage(null);
+    setIsTriggerActionRunning(true);
+
+    try {
+      const result = await callIntegrationFunction({
+        anonKey,
+        body: payload,
+        config: backendConfig,
+        functionName: "trigger-actions",
+        session,
+      });
+
+      if (result.error) {
+        setTriggerActionError("Unable to update trigger.");
+        return;
+      }
+
+      setTriggerActionMessage("Trigger action saved.");
+      await refreshSyncedTriggers();
+    } catch (error) {
+      setTriggerActionError("Unable to update trigger.");
+    } finally {
+      setIsTriggerActionRunning(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.captureContainer}>
@@ -626,8 +733,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
             </View>
           ))}
           <View style={styles.integrationControls}>
-            {INTEGRATION_CONTROL_ROWS.map(([label, controlKey]) => {
-              const enabled = integrationDashboard.triggerControls[controlKey];
+            {INTEGRATION_CONTROL_ROWS.map(([label, action, controlKey]) => {
+              const needsSelectedTrigger = action !== "create";
+              const enabled =
+                integrationDashboard.triggerControls[controlKey] &&
+                !isTriggerActionRunning &&
+                (!needsSelectedTrigger ||
+                  (integrationSync.hydrated && Boolean(selectedTrigger)));
 
               return (
                 <Pressable
@@ -635,6 +747,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                   accessibilityState={{ disabled: !enabled }}
                   disabled={!enabled}
                   key={label}
+                  onPress={() => handleTriggerAction(action)}
                   style={[
                     styles.smallButton,
                     !enabled ? styles.smallButtonDisabled : null,
@@ -645,6 +758,12 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
               );
             })}
           </View>
+          {triggerActionMessage ? (
+            <Text style={styles.panelMeta}>{triggerActionMessage}</Text>
+          ) : null}
+          {triggerActionError ? (
+            <Text style={styles.error}>{triggerActionError}</Text>
+          ) : null}
           <Text style={styles.panelMeta}>Run history</Text>
           {integrationDashboard.runHistory.map((run) => (
             <Text key={run.id} style={styles.panelMeta}>

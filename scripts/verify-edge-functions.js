@@ -268,6 +268,120 @@ async function verifyHeartbeatIngestFunction() {
   assert.equal(heartbeatCall.body.capabilities.device, "Pixel");
 }
 
+async function verifyTriggerActionsFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/trigger-actions/index.ts", {
+    fetchImpl: async (url, options = {}) => {
+      const requestUrl = String(url);
+
+      if (requestUrl.endsWith("/auth/v1/user")) {
+        return options.headers?.Authorization === "Bearer user-token"
+          ? jsonResponse({ id: "user-1" })
+          : jsonResponse({ error: "invalid" }, 401);
+      }
+
+      const body = parseBody(options);
+
+      calls.push({
+        body,
+        headers: options.headers || {},
+        method: options.method || "GET",
+        url: requestUrl,
+      });
+
+      if (requestUrl.includes("/trigger_definitions")) {
+        return jsonResponse([
+          {
+            id: body.id || "trigger-1",
+            name: body.name || "Receipt follow-up",
+            source: body.source || "backend_catalog",
+            status: body.status || "active",
+            trigger_type: body.trigger_type || "receipt_reviewed",
+            user_id: body.user_id || "user-1",
+          },
+        ]);
+      }
+
+      return jsonResponse([]);
+    },
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: { action: "create" },
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const mismatch = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "create",
+          userId: "user-2",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(mismatch.status, 403);
+  assert.equal(mismatch.data.error, "user_mismatch");
+  assert.equal(calls.length, 0);
+
+  const created = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "create",
+          patch: {
+            name: "Receipt follow-up",
+            source: "backend_catalog",
+            token: "must-not-persist",
+            type: "receipt_reviewed",
+          },
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const createCall = calls.find((call) => call.method === "POST");
+
+  assert.equal(created.status, 200);
+  assert.equal(created.data.trigger.id, "trigger-1");
+  assert.ok(createCall.url.includes("/trigger_definitions"));
+  assert.equal(createCall.headers.Authorization, "Bearer service-key");
+  assert.equal(createCall.body.user_id, "user-1");
+  assert.equal(createCall.body.name, "Receipt follow-up");
+  assert.equal(createCall.body.status, "active");
+  assert.equal(createCall.body.token, undefined);
+
+  const paused = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "pause",
+          triggerId: "trigger-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const patchCall = calls.find((call) => call.method === "PATCH");
+
+  assert.equal(paused.status, 200);
+  assert.ok(patchCall.url.includes("id=eq.trigger-1"));
+  assert.ok(patchCall.url.includes("user_id=eq.user-1"));
+  assert.equal(patchCall.body.status, "paused");
+}
+
 async function verifyLocationSuggestionsFunction() {
   const calls = [];
   const handler = loadEdgeHandler(
@@ -607,6 +721,7 @@ async function verifyComposioWebhookFunction() {
 async function main() {
   await verifyMobileSyncFunction();
   await verifyHeartbeatIngestFunction();
+  await verifyTriggerActionsFunction();
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyCodeExecutionFunction();

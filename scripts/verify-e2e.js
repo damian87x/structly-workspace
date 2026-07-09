@@ -376,6 +376,7 @@ function verifyE2EFlow() {
 function verifyBackendFunctionSources() {
   const heartbeatSource = read("supabase/functions/heartbeat-ingest/index.ts");
   const mobileSyncSource = read("supabase/functions/mobile-sync/index.ts");
+  const triggerActionSource = read("supabase/functions/trigger-actions/index.ts");
   const scheduleSource = read("supabase/functions/schedule-jobs/index.ts");
   const locationSource = read("supabase/functions/location-suggestions/index.ts");
   const codeSource = read("supabase/functions/code-execution-bridge/index.ts");
@@ -392,6 +393,12 @@ function verifyBackendFunctionSources() {
   assert.match(mobileSyncSource, /trigger_definitions/);
   assert.match(mobileSyncSource, /trigger_runs/);
   assert.doesNotMatch(mobileSyncSource, /select=\*/);
+  assert.match(triggerActionSource, /auth\/v1\/user/);
+  assert.match(triggerActionSource, /allowedActions/);
+  assert.match(triggerActionSource, /allowedPatchKeys/);
+  assert.match(triggerActionSource, /trigger_definitions/);
+  assert.match(triggerActionSource, /user_id=eq\.\$\{userFilter\}/);
+  assert.match(triggerActionSource, /status: "deleted"/);
   assert.match(scheduleSource, /SCHEDULE_JOBS_TOKEN/);
   assert.doesNotMatch(scheduleSource, /startsWith\("bearer "\)/);
   assert.match(scheduleSource, /trigger_runs/);
@@ -424,6 +431,7 @@ function verifyBackendFunctionSources() {
   assert.match(edgeHarnessSource, /vm\.runInNewContext/);
   assert.match(edgeHarnessSource, /verifyMobileSyncFunction/);
   assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
+  assert.match(edgeHarnessSource, /verifyTriggerActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
