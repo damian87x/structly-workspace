@@ -3579,7 +3579,7 @@ function verifyE2EHarnessSource() {
   assert.equal(pkg.scripts["test:ci"], "npm run test:all");
   assert.equal(
     pkg.scripts["test:e2e"],
-    "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
+    "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js && node scripts/verify-pixel-device.js --self-test",
   );
   assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");
   assert.equal(pkg.scripts["test:pixel"], "node scripts/verify-pixel-device.js");
@@ -3624,6 +3624,14 @@ function verifyE2EHarnessSource() {
   assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
   assert.match(pixelSmokeSource, /--require-device/);
   assert.match(pixelSmokeSource, /--require-install/);
+  assert.match(pixelSmokeSource, /--require-location-granted/);
+  assert.match(pixelSmokeSource, /--require-location-denied/);
+  assert.match(pixelSmokeSource, /--require-launch/);
+  assert.match(pixelSmokeSource, /--self-test/);
+  assert.match(pixelSmokeSource, /ACCESS_BACKGROUND_LOCATION/);
+  assert.match(pixelSmokeSource, /foregroundLocationGranted/);
+  assert.match(pixelSmokeSource, /monkey/);
+  assert.match(pixelSmokeSource, /pidof/);
   assert.match(pixelSmokeSource, /ro\.product\.model/);
   assert.match(ciDocs, /npm run test:ci/);
   assert.match(ciDocs, /actions\/checkout@v5/);
@@ -3641,6 +3649,9 @@ function verifyE2EHarnessSource() {
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);
   assert.match(pixelSmokeDocs, /STRUCTLY_ANDROID_PACKAGE/);
+  assert.match(pixelSmokeDocs, /--require-location-granted/);
+  assert.match(pixelSmokeDocs, /--require-location-denied/);
+  assert.match(pixelSmokeDocs, /--require-launch/);
 }
 
 async function main() {

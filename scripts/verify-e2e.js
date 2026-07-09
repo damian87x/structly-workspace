@@ -96,7 +96,7 @@ function verifyStaticE2EContracts() {
 
   assert.equal(
     pkg.scripts["test:e2e"],
-    "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
+    "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js && node scripts/verify-pixel-device.js --self-test",
   );
   assert.equal(pkg.scripts["test:ci"], "npm run test:all");
   assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");

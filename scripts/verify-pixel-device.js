@@ -2,6 +2,10 @@ const { execFileSync } = require("child_process");
 const assert = require("assert");
 
 const DEFAULT_PACKAGE = "com.structly.app";
+const BACKGROUND_LOCATION_PERMISSION =
+  "android.permission.ACCESS_BACKGROUND_LOCATION";
+const COARSE_LOCATION_PERMISSION = "android.permission.ACCESS_COARSE_LOCATION";
+const FINE_LOCATION_PERMISSION = "android.permission.ACCESS_FINE_LOCATION";
 
 function runAdb(args) {
   return execFileSync("adb", args, {
@@ -76,12 +80,78 @@ function getPackageInfo(serial, packageName) {
   }
 }
 
-function hasPermission(packageInfo, permission) {
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasPermissionDeclared(packageInfo, permission) {
   return packageInfo.includes(permission);
+}
+
+function getRuntimePermissionGrant(packageInfo, permission) {
+  const pattern = new RegExp(`${escapeRegExp(permission)}: granted=(true|false)`);
+  const match = packageInfo.match(pattern);
+
+  return match ? match[1] === "true" : null;
+}
+
+function hasForegroundLocationGrant(permissions) {
+  return (
+    permissions.coarseLocationGranted === true ||
+    permissions.fineLocationGranted === true
+  );
+}
+
+function launchPackage(serial, packageName) {
+  return runAdb([
+    "-s",
+    serial,
+    "shell",
+    "monkey",
+    "-p",
+    packageName,
+    "-c",
+    "android.intent.category.LAUNCHER",
+    "1",
+  ]);
+}
+
+function isPackageRunning(serial, packageName) {
+  try {
+    return shell(serial, ["pidof", packageName]).length > 0;
+  } catch (error) {
+    return false;
+  }
 }
 
 function buildReport(serial, packageName) {
   const packageInfo = getPackageInfo(serial, packageName);
+  const permissions = {
+    backgroundLocationDeclared: hasPermissionDeclared(
+      packageInfo,
+      BACKGROUND_LOCATION_PERMISSION,
+    ),
+    backgroundLocationGranted: getRuntimePermissionGrant(
+      packageInfo,
+      BACKGROUND_LOCATION_PERMISSION,
+    ),
+    coarseLocationDeclared: hasPermissionDeclared(
+      packageInfo,
+      COARSE_LOCATION_PERMISSION,
+    ),
+    coarseLocationGranted: getRuntimePermissionGrant(
+      packageInfo,
+      COARSE_LOCATION_PERMISSION,
+    ),
+    fineLocationDeclared: hasPermissionDeclared(
+      packageInfo,
+      FINE_LOCATION_PERMISSION,
+    ),
+    fineLocationGranted: getRuntimePermissionGrant(
+      packageInfo,
+      FINE_LOCATION_PERMISSION,
+    ),
+  };
 
   return {
     androidRelease: getProp(serial, "ro.build.version.release"),
@@ -91,23 +161,94 @@ function buildReport(serial, packageName) {
     model: getProp(serial, "ro.product.model"),
     packageName,
     permissions: {
-      coarseLocationDeclared: hasPermission(
-        packageInfo,
-        "android.permission.ACCESS_COARSE_LOCATION",
-      ),
-      fineLocationDeclared: hasPermission(
-        packageInfo,
-        "android.permission.ACCESS_FINE_LOCATION",
-      ),
+      ...permissions,
+      foregroundLocationGranted: hasForegroundLocationGrant(permissions),
     },
     serial,
   };
 }
 
+function runSelfTest() {
+  const grantedPackageInfo = `
+    Package [com.structly.app]
+    requested permissions:
+      ${COARSE_LOCATION_PERMISSION}
+      ${FINE_LOCATION_PERMISSION}
+    runtime permissions:
+      ${COARSE_LOCATION_PERMISSION}: granted=true, flags=[USER_SET]
+      ${FINE_LOCATION_PERMISSION}: granted=false, flags=[USER_SET]
+  `;
+  const deniedPackageInfo = `
+    Package [com.structly.app]
+    requested permissions:
+      ${COARSE_LOCATION_PERMISSION}
+      ${FINE_LOCATION_PERMISSION}
+    runtime permissions:
+      ${COARSE_LOCATION_PERMISSION}: granted=false, flags=[USER_SET]
+      ${FINE_LOCATION_PERMISSION}: granted=false, flags=[USER_SET]
+  `;
+  const grantedPermissions = {
+    coarseLocationGranted: getRuntimePermissionGrant(
+      grantedPackageInfo,
+      COARSE_LOCATION_PERMISSION,
+    ),
+    fineLocationGranted: getRuntimePermissionGrant(
+      grantedPackageInfo,
+      FINE_LOCATION_PERMISSION,
+    ),
+  };
+  const deniedPermissions = {
+    coarseLocationGranted: getRuntimePermissionGrant(
+      deniedPackageInfo,
+      COARSE_LOCATION_PERMISSION,
+    ),
+    fineLocationGranted: getRuntimePermissionGrant(
+      deniedPackageInfo,
+      FINE_LOCATION_PERMISSION,
+    ),
+  };
+
+  assert.equal(
+    hasPermissionDeclared(grantedPackageInfo, COARSE_LOCATION_PERMISSION),
+    true,
+  );
+  assert.equal(
+    hasPermissionDeclared(grantedPackageInfo, BACKGROUND_LOCATION_PERMISSION),
+    false,
+  );
+  assert.equal(
+    getRuntimePermissionGrant(grantedPackageInfo, BACKGROUND_LOCATION_PERMISSION),
+    null,
+  );
+  assert.equal(hasForegroundLocationGrant(grantedPermissions), true);
+  assert.equal(hasForegroundLocationGrant(deniedPermissions), false);
+  console.log("Pixel smoke parser self-test passed.");
+}
+
 function main() {
   const requireDevice = process.argv.includes("--require-device");
   const requireInstall = process.argv.includes("--require-install");
+  const requireLaunch = process.argv.includes("--require-launch");
+  const requireLocationDenied = process.argv.includes("--require-location-denied");
+  const requireLocationGranted = process.argv.includes("--require-location-granted");
+  const selfTest = process.argv.includes("--self-test");
   const packageName = process.env.STRUCTLY_ANDROID_PACKAGE || DEFAULT_PACKAGE;
+  const mustHaveInstall =
+    requireInstall ||
+    requireLaunch ||
+    requireLocationDenied ||
+    requireLocationGranted;
+
+  if (selfTest) {
+    runSelfTest();
+    return;
+  }
+
+  if (requireLocationDenied && requireLocationGranted) {
+    throw new Error(
+      "Choose either --require-location-granted or --require-location-denied.",
+    );
+  }
 
   if (!hasAdb()) {
     const message = "Pixel smoke skipped; adb is not installed or not on PATH.";
@@ -141,7 +282,7 @@ function main() {
     `Connected device is not a Google Pixel: ${JSON.stringify(report)}`,
   );
 
-  if (requireInstall) {
+  if (mustHaveInstall) {
     assert.equal(
       report.installed,
       true,
@@ -157,6 +298,42 @@ function main() {
       true,
       "Structly package does not declare fine location permission.",
     );
+    assert.equal(
+      report.permissions.backgroundLocationDeclared,
+      false,
+      "Structly package should not declare background location permission.",
+    );
+    assert.notEqual(
+      report.permissions.backgroundLocationGranted,
+      true,
+      "Structly package should not have background location granted.",
+    );
+  }
+
+  if (requireLocationGranted) {
+    assert.equal(
+      report.permissions.foregroundLocationGranted,
+      true,
+      "Structly package does not currently have foreground location granted.",
+    );
+  }
+
+  if (requireLocationDenied) {
+    assert.equal(
+      report.permissions.foregroundLocationGranted,
+      false,
+      "Structly package currently has foreground location granted.",
+    );
+  }
+
+  if (requireLaunch) {
+    launchPackage(device.serial, packageName);
+    assert.equal(
+      isPackageRunning(device.serial, packageName),
+      true,
+      `${packageName} did not appear to be running after launch.`,
+    );
+    report.launchChecked = true;
   }
 
   console.log(JSON.stringify(report, null, 2));

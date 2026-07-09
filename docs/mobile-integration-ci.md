@@ -13,6 +13,7 @@ npm run test:ci
 - OAuth dependency audit
 - local integration E2E
 - Edge Function handler E2E via `scripts/verify-edge-functions.js`
+- Pixel smoke parser self-test via `scripts/verify-pixel-device.js --self-test`
 
 ## GitHub Actions Template
 
