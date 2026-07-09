@@ -47,6 +47,7 @@ Optional configuration:
 ```sh
 STRUCTLY_PIXEL_SERIAL="adb-device-serial"
 STRUCTLY_ANDROID_PACKAGE="com.structly.app"
+STRUCTLY_ADB_PATH="$HOME/Android/Sdk/platform-tools/adb"
 ```
 
 ## What It Verifies

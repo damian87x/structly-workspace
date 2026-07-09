@@ -3646,6 +3646,8 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyWorkerHeartbeat/);
   assert.match(liveSmokeSource, /--require-live/);
   assert.match(pixelSmokeSource, /adb/);
+  assert.match(pixelSmokeSource, /STRUCTLY_ADB_PATH/);
+  assert.match(pixelSmokeSource, /ANDROID_SDK_ROOT/);
   assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
   assert.match(pixelSmokeSource, /--require-device/);
   assert.match(pixelSmokeSource, /--require-install/);
@@ -3676,6 +3678,7 @@ function verifyE2EHarnessSource() {
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);
   assert.match(pixelSmokeDocs, /STRUCTLY_ANDROID_PACKAGE/);
+  assert.match(pixelSmokeDocs, /STRUCTLY_ADB_PATH/);
   assert.match(pixelSmokeDocs, /--require-location-granted/);
   assert.match(pixelSmokeDocs, /--require-location-denied/);
   assert.match(pixelSmokeDocs, /--require-launch/);

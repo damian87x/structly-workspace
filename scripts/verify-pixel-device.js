@@ -1,5 +1,7 @@
 const { execFileSync } = require("child_process");
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 const DEFAULT_PACKAGE = "com.structly.app";
 const BACKGROUND_LOCATION_PERMISSION =
@@ -7,8 +9,22 @@ const BACKGROUND_LOCATION_PERMISSION =
 const COARSE_LOCATION_PERMISSION = "android.permission.ACCESS_COARSE_LOCATION";
 const FINE_LOCATION_PERMISSION = "android.permission.ACCESS_FINE_LOCATION";
 
+function getAdbCommand() {
+  const candidates = [
+    process.env.STRUCTLY_ADB_PATH,
+    process.env.ANDROID_HOME &&
+      path.join(process.env.ANDROID_HOME, "platform-tools", "adb"),
+    process.env.ANDROID_SDK_ROOT &&
+      path.join(process.env.ANDROID_SDK_ROOT, "platform-tools", "adb"),
+    process.env.HOME &&
+      path.join(process.env.HOME, "Android", "Sdk", "platform-tools", "adb"),
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "adb";
+}
+
 function runAdb(args) {
-  return execFileSync("adb", args, {
+  return execFileSync(getAdbCommand(), args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
@@ -251,7 +267,8 @@ function main() {
   }
 
   if (!hasAdb()) {
-    const message = "Pixel smoke skipped; adb is not installed or not on PATH.";
+    const message =
+      "Pixel smoke skipped; adb is not installed, not on PATH, and STRUCTLY_ADB_PATH is not configured.";
 
     if (requireDevice) {
       throw new Error(message);
