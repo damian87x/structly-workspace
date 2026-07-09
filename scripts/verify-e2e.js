@@ -459,6 +459,7 @@ function verifyBackendFunctionSources() {
   assert.match(mcpSource, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(mcpSource, /integration_sources/);
   assert.match(mcpSource, /allowedTools/);
+  assert.match(mcpSource, /MCP_MOCK_RESULT_JSON/);
   assert.match(mcpSource, /mcp_tool_not_allowed/);
   assert.match(mcpSource, /mcp_server_mismatch/);
   assert.match(mcpSource, /blockedHostPattern/);

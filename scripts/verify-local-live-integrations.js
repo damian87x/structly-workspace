@@ -23,6 +23,8 @@ const CODE_RUNNER_TOKEN =
   process.env.STRUCTLY_TEST_CODE_RUNNER_TOKEN || "local-code-runner-token";
 const DAYTONA_SANDBOX_ID =
   process.env.STRUCTLY_TEST_DAYTONA_SANDBOX_ID || "local-daytona-sandbox";
+const MCP_SOURCE_KEY = process.env.STRUCTLY_TEST_MCP_SERVER_ID || "local-mcp";
+const MCP_TOOL_NAME = process.env.STRUCTLY_TEST_MCP_TOOL_NAME || "append_receipt";
 
 function unquote(value) {
   return String(value || "").replace(/^['"]|['"]$/g, "");
@@ -73,6 +75,17 @@ function writeFunctionEnvFile() {
     "DAYTONA_API_KEY=local-daytona-api-key",
     `DAYTONA_SANDBOX_ID=${DAYTONA_SANDBOX_ID}`,
     "DAYTONA_MOCK_RESULT=local-daytona-ok",
+    `MCP_MOCK_RESULT_JSON=${JSON.stringify(
+      JSON.stringify({
+        content: [{ text: "local-mcp-ok", type: "text" }],
+        tools: [
+          {
+            inputSchema: { type: "object" },
+            name: MCP_TOOL_NAME,
+          },
+        ],
+      }),
+    )}`,
     `COMPOSIO_WEBHOOK_SECRET=${COMPOSIO_WEBHOOK_SECRET}`,
     "",
   ].join("\n");
@@ -218,6 +231,36 @@ async function createTriggerFixtures({ endpoint, serviceKey, userId }) {
   };
 }
 
+async function createMcpSource({ endpoint, serviceKey, userId }) {
+  const response = await fetch(
+    `${endpoint}/rest/v1/integration_sources?on_conflict=user_id,source_key`,
+    {
+      body: JSON.stringify({
+        capabilities: {
+          allowedTools: [MCP_TOOL_NAME],
+          serverUrl: "https://mcp.local-smoke.example/mcp",
+        },
+        display_name: "Local MCP Smoke",
+        enabled: true,
+        source_key: MCP_SOURCE_KEY,
+        source_type: "mcp",
+        user_id: userId,
+      }),
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=representation",
+        apikey: serviceKey,
+      },
+      method: "POST",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`MCP source insert failed: ${response.status} ${await response.text()}`);
+  }
+}
+
 function runLiveSmoke(env) {
   const result = spawnSync(process.execPath, ["scripts/verify-live-integrations.js"], {
     encoding: "utf8",
@@ -265,9 +308,14 @@ async function main() {
       serviceKey,
       userId: session.user.id,
     });
+    await createMcpSource({
+      endpoint: LOCAL_SUPABASE_URL,
+      serviceKey,
+      userId: session.user.id,
+    });
 
     console.log(
-      "Running local live smoke for backend heartbeats, location, triggers, code request, Composio webhook, and schedule.",
+      "Running local live smoke for backend heartbeats, location, triggers, code request, Daytona runner, Composio webhook, schedule, and MCP.",
     );
     runLiveSmoke({
       ...process.env,
@@ -279,6 +327,9 @@ async function main() {
       STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET: COMPOSIO_WEBHOOK_SECRET,
       STRUCTLY_TEST_DAYTONA_SANDBOX_ID: DAYTONA_SANDBOX_ID,
       STRUCTLY_TEST_LOCATION_TRIGGER_ID: fixtures.locationTriggerId,
+      STRUCTLY_TEST_MCP_SERVER_ID: MCP_SOURCE_KEY,
+      STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON: "{}",
+      STRUCTLY_TEST_MCP_TOOL_NAME: MCP_TOOL_NAME,
       STRUCTLY_TEST_SCHEDULE_TOKEN: SCHEDULE_TOKEN,
       STRUCTLY_TEST_SCHEDULE_TRIGGER_ID: fixtures.scheduleTriggerId,
       STRUCTLY_TEST_TRIGGER_ACTIONS: "1",

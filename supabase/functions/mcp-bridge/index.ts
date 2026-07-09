@@ -172,6 +172,22 @@ function buildMcpRequest(body, allowedTools = []) {
   };
 }
 
+function getMockMcpResponseBody(mcpRequest) {
+  const result = Deno.env.get("MCP_MOCK_RESULT_JSON");
+
+  if (!result) {
+    return null;
+  }
+
+  const parsed = JSON.parse(result);
+
+  return {
+    id: mcpRequest.id,
+    jsonrpc: "2.0",
+    result: parsed,
+  };
+}
+
 serve(async (request) => {
   if (request.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {
@@ -228,6 +244,22 @@ serve(async (request) => {
       headers: jsonHeaders,
       status: 403,
     });
+  }
+
+  const mockResponseBody = getMockMcpResponseBody(mcpRequest);
+
+  if (mockResponseBody) {
+    return new Response(
+      JSON.stringify({
+        accepted: true,
+        action: body.action === "list_tools" ? "list_tools" : "call_tool",
+        result: mockResponseBody,
+        serverId: configuredServer.sourceId,
+        sourceKey: configuredServer.sourceKey,
+        transport: "streamable_http",
+      }),
+      { headers: jsonHeaders },
+    );
   }
 
   const mcpResponse = await fetch(configuredServer.serverUrl, {

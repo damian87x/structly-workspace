@@ -3302,6 +3302,7 @@ function verifyMcpBridgeBackendOnlySource() {
   assert.match(functionSource, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(functionSource, /integration_sources/);
   assert.match(functionSource, /allowedTools/);
+  assert.match(functionSource, /MCP_MOCK_RESULT_JSON/);
   assert.match(functionSource, /mcp_tool_not_allowed/);
   assert.match(functionSource, /mcp_server_mismatch/);
   assert.match(functionSource, /blockedHostPattern/);
@@ -3643,6 +3644,9 @@ function verifyE2EHarnessSource() {
   assert.match(localLiveSmokeSource, /supabase[\s\S]*migration[\s\S]*up/);
   assert.match(localLiveSmokeSource, /verify-live-integrations\.js/);
   assert.match(localLiveSmokeSource, /DAYTONA_MOCK_RESULT/);
+  assert.match(localLiveSmokeSource, /MCP_MOCK_RESULT_JSON/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_MCP_TOOL_NAME/);
   assert.match(localLiveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
   assert.match(localLiveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(localLiveSmokeSource, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);

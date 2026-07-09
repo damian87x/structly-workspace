@@ -30,7 +30,7 @@ supabase start
 npm run test:live:local
 ```
 
-It verifies device heartbeat, worker heartbeat, status, location suggestion, trigger dispatch, trigger lifecycle actions, code execution request creation, Daytona runner handling with a local mock result, signed Composio webhook ingestion, and schedule tick ingestion against local Edge Functions.
+It verifies device heartbeat, worker heartbeat, status, location suggestion, trigger dispatch, trigger lifecycle actions, code execution request creation, Daytona runner handling with a local mock result, signed Composio webhook ingestion, schedule tick ingestion, and MCP tool listing/calling with a local mock result against local Edge Functions.
 
 ## Optional Paths
 
