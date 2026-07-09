@@ -55,8 +55,11 @@ serve(async (request) => {
   const endpoint = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const userFilter = encodeURIComponent(auth.userId);
+  let codeExecutionRequests = [];
   let connectors = [];
+  let locationSuggestions = [];
   let runHistory = [];
+  let scheduleJobs = [];
   let triggerDefinitions = [];
 
   if (endpoint && serviceKey) {
@@ -64,7 +67,14 @@ serve(async (request) => {
       Authorization: `Bearer ${serviceKey}`,
       apikey: serviceKey,
     };
-    const [runs, triggers, sources] = await Promise.all([
+    const [
+      runs,
+      triggers,
+      sources,
+      schedules,
+      locations,
+      codeRequests,
+    ] = await Promise.all([
       fetch(
         `${endpoint}/rest/v1/trigger_runs?select=id,user_id,trigger_id,status,attempt_count,last_error,updated_at&user_id=eq.${userFilter}&order=updated_at.desc`,
         { headers },
@@ -75,6 +85,18 @@ serve(async (request) => {
       ),
       fetch(
         `${endpoint}/rest/v1/integration_sources?select=id,source_key,source_type,display_name,capabilities,enabled&user_id=eq.${userFilter}`,
+        { headers },
+      ),
+      fetch(
+        `${endpoint}/rest/v1/schedule_jobs?select=id,trigger_id,schedule_key,cron_expression,interval_minutes,status,next_run_at,last_run_at,created_at,updated_at&user_id=eq.${userFilter}&order=next_run_at.asc`,
+        { headers },
+      ),
+      fetch(
+        `${endpoint}/rest/v1/location_event_suggestions?select=id,event_key,event_type,place_id,place_label,coarse_location,suggestion,created_at&user_id=eq.${userFilter}&order=created_at.desc`,
+        { headers },
+      ),
+      fetch(
+        `${endpoint}/rest/v1/code_execution_requests?select=id,trigger_run_id,provider,status,language,working_directory,timeout_seconds,created_at,updated_at&user_id=eq.${userFilter}&order=created_at.desc`,
         { headers },
       ),
     ]);
@@ -90,12 +112,27 @@ serve(async (request) => {
     if (sources.ok) {
       connectors = await sources.json();
     }
+
+    if (schedules.ok) {
+      scheduleJobs = await schedules.json();
+    }
+
+    if (locations.ok) {
+      locationSuggestions = await locations.json();
+    }
+
+    if (codeRequests.ok) {
+      codeExecutionRequests = await codeRequests.json();
+    }
   }
 
   return new Response(
     JSON.stringify({
+      codeExecutionRequests,
       connectors,
+      locationSuggestions,
       runHistory,
+      scheduleJobs,
       triggerDefinitions,
     }),
     { headers: jsonHeaders },

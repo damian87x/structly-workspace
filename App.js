@@ -261,10 +261,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     stale: true,
   });
   const [integrationSync, setIntegrationSync] = useState({
+    codeExecutionRequests: [],
     error: false,
     hydrated: false,
+    locationSuggestions: [],
     loading: false,
     runHistory: [],
+    scheduleJobs: [],
     triggerDefinitions: [],
   });
   const lastHeartbeatSentAtRef = useRef(null);
@@ -422,10 +425,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
         }
 
         setIntegrationSync({
+          codeExecutionRequests: syncResult.data.codeExecutionRequests || [],
           error: false,
           hydrated: true,
+          locationSuggestions: syncResult.data.locationSuggestions || [],
           loading: false,
           runHistory: syncResult.data.runHistory || [],
+          scheduleJobs: syncResult.data.scheduleJobs || [],
           triggerDefinitions: syncResult.data.triggerDefinitions || [],
         });
       } catch (error) {
@@ -625,10 +631,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     }
 
     setIntegrationSync({
+      codeExecutionRequests: syncResult.data.codeExecutionRequests || [],
       error: false,
       hydrated: true,
+      locationSuggestions: syncResult.data.locationSuggestions || [],
       loading: false,
       runHistory: syncResult.data.runHistory || [],
+      scheduleJobs: syncResult.data.scheduleJobs || [],
       triggerDefinitions: syncResult.data.triggerDefinitions || [],
     });
   }
@@ -792,6 +801,15 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           </Text>
           <Text style={styles.panelMeta}>
             Trigger list: {integrationDashboard.triggerListState}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Schedule jobs: {integrationSync.scheduleJobs.length}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Location suggestions: {integrationSync.locationSuggestions.length}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Code requests: {integrationSync.codeExecutionRequests.length}
           </Text>
           {locationSuggestionMessage ? (
             <Text style={styles.panelMeta}>{locationSuggestionMessage}</Text>

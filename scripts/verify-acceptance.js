@@ -2357,6 +2357,7 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /coarse-only location suggestion from mobile/);
   assert.match(roadmap, /foreground\/resume device heartbeats/);
   assert.match(roadmap, /user-scoped mobile sync/);
+  assert.match(roadmap, /schedule jobs, location suggestions, and code execution request summaries/);
   assert.match(roadmap, /trigger create\/edit\/pause\/resume\/delete/);
   assert.match(roadmap, /approve or deny approval-required trigger runs/);
   assert.match(roadmap, /npm run test:e2e/);
@@ -3372,7 +3373,11 @@ function verifySupabaseIntegrationSources() {
   }
   assert.match(
     fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
-    /auth\/v1\/user[\s\S]*user_id=eq\.\$\{userFilter\}[\s\S]*integration_sources/,
+    /auth\/v1\/user[\s\S]*user_id=eq\.\$\{userFilter\}[\s\S]*integration_sources[\s\S]*schedule_jobs[\s\S]*location_event_suggestions[\s\S]*code_execution_requests/,
+  );
+  assert.doesNotMatch(
+    fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
+    /environment|request_payload/,
   );
   assert.doesNotMatch(
     fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
@@ -3489,6 +3494,12 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /resumeTriggerPayload/);
   assert.match(appSource, /deleteTriggerPayload/);
   assert.match(appSource, /integrationSync/);
+  assert.match(appSource, /scheduleJobs/);
+  assert.match(appSource, /locationSuggestions/);
+  assert.match(appSource, /codeExecutionRequests/);
+  assert.match(appSource, /Schedule jobs:/);
+  assert.match(appSource, /Location suggestions:/);
+  assert.match(appSource, /Code requests:/);
   assert.match(appSource, /triggerDefinitions/);
   assert.match(appSource, /runHistory/);
   assert.match(appSource, /providerConfigured: data\.bridge === "available"/);

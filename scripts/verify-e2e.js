@@ -110,6 +110,9 @@ function verifyStaticE2EContracts() {
   assert.match(appSource, /functionName: "location-suggestions"/);
   assert.match(appSource, /createMobileLocationSuggestionPayload/);
   assert.match(appSource, /findLocationTrigger/);
+  assert.match(appSource, /Schedule jobs:/);
+  assert.match(appSource, /Location suggestions:/);
+  assert.match(appSource, /Code requests:/);
   assert.doesNotMatch(appSource, /DAYTONA|COMPOSIO|SERVICE_ROLE|MCP_API_KEY/);
   assert.doesNotMatch(envExample, /DAYTONA|COMPOSIO|SERVICE_ROLE|MCP_API_KEY/);
   assert.match(migration, /create table if not exists public\.schedule_jobs/);
@@ -394,8 +397,13 @@ function verifyBackendFunctionSources() {
   assert.match(mobileSyncSource, /auth\/v1\/user/);
   assert.match(mobileSyncSource, /user_id=eq\.\$\{userFilter\}/);
   assert.match(mobileSyncSource, /integration_sources/);
+  assert.match(mobileSyncSource, /schedule_jobs/);
+  assert.match(mobileSyncSource, /location_event_suggestions/);
+  assert.match(mobileSyncSource, /code_execution_requests/);
   assert.match(mobileSyncSource, /trigger_definitions/);
   assert.match(mobileSyncSource, /trigger_runs/);
+  assert.doesNotMatch(mobileSyncSource, /environment/);
+  assert.doesNotMatch(mobileSyncSource, /request_payload/);
   assert.doesNotMatch(mobileSyncSource, /select=\*/);
   assert.match(runActionSource, /auth\/v1\/user/);
   assert.match(runActionSource, /allowedActions/);

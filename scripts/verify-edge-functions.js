@@ -161,7 +161,14 @@ async function verifyMobileSyncFunction() {
     fetchImpl: createAuthedFetch({
       calls,
       restResponses: {
+        "code_execution_requests": [
+          { id: "code-1", language: "typescript", status: "approval_required" },
+        ],
         "integration_sources": [{ id: "source-1", source_key: "composio" }],
+        "location_event_suggestions": [
+          { id: "location-1", place_label: "Soho Market" },
+        ],
+        "schedule_jobs": [{ id: "schedule-1", status: "active" }],
         "trigger_definitions": [
           { id: "trigger-1", name: "Receipt follow-up", user_id: "user-1" },
         ],
@@ -193,10 +200,16 @@ async function verifyMobileSyncFunction() {
   const restCalls = calls.filter((call) => call.url.includes("/rest/v1/"));
 
   assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.codeExecutionRequests.length, 1);
   assert.equal(accepted.data.connectors.length, 1);
+  assert.equal(accepted.data.locationSuggestions.length, 1);
   assert.equal(accepted.data.triggerDefinitions.length, 1);
   assert.equal(accepted.data.runHistory.length, 1);
+  assert.equal(accepted.data.scheduleJobs.length, 1);
+  assert.ok(restCalls.some((call) => call.url.includes("/code_execution_requests")));
   assert.ok(restCalls.some((call) => call.url.includes("/integration_sources")));
+  assert.ok(restCalls.some((call) => call.url.includes("/location_event_suggestions")));
+  assert.ok(restCalls.some((call) => call.url.includes("/schedule_jobs")));
   assert.ok(restCalls.some((call) => call.url.includes("/trigger_definitions")));
   assert.ok(restCalls.some((call) => call.url.includes("/trigger_runs")));
   assert.ok(restCalls.every((call) => call.url.includes("user_id=eq.user-1")));
