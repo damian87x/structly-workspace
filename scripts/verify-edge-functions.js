@@ -545,6 +545,86 @@ async function verifyRunActionsFunction() {
   assert.equal(denyCall.body.result.externalActionReady, false);
 }
 
+async function verifyTriggerDispatchFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/trigger-dispatch/index.ts", {
+    fetchImpl: createAuthedFetch({ calls }),
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          eventKey: "receipt-1",
+          eventType: "receipt_reviewed",
+          source: "database",
+          triggerId: "trigger-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const mismatch = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          eventKey: "receipt-1",
+          eventType: "receipt_reviewed",
+          source: "database",
+          triggerId: "trigger-1",
+          userId: "user-2",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(mismatch.status, 403);
+  assert.equal(mismatch.data.error, "user_mismatch");
+  assert.equal(calls.length, 0);
+
+  const accepted = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "send_email",
+          eventKey: "receipt-1",
+          eventType: "receipt_reviewed",
+          payload: { receiptId: "receipt-1" },
+          source: "database",
+          triggerId: "trigger-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const eventCall = calls.find((call) =>
+    call.url.includes("/integration_events"),
+  );
+  const runCall = calls.find((call) => call.url.includes("/trigger_runs"));
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.idempotencyKey, "database:receipt-1");
+  assert.equal(accepted.data.persisted, true);
+  assert.ok(eventCall);
+  assert.ok(runCall);
+  assert.equal(eventCall.body.event_key, "receipt-1");
+  assert.equal(eventCall.body.event_type, "receipt_reviewed");
+  assert.equal(eventCall.body.source, "database");
+  assert.equal(eventCall.body.user_id, "user-1");
+  assert.equal(runCall.body.idempotency_key, "database:receipt-1");
+  assert.equal(runCall.body.status, "approval_required");
+  assert.equal(runCall.body.trigger_id, "trigger-1");
+  assert.equal(runCall.body.user_id, "user-1");
+  assert.ok(runCall.url.includes("on_conflict=trigger_id,idempotency_key"));
+}
+
 async function verifyLocationSuggestionsFunction() {
   const calls = [];
   const handler = loadEdgeHandler(
@@ -1108,6 +1188,7 @@ async function main() {
   await verifyHeartbeatIngestFunction();
   await verifyTriggerActionsFunction();
   await verifyRunActionsFunction();
+  await verifyTriggerDispatchFunction();
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyMcpBridgeFunction();

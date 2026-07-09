@@ -3411,7 +3411,7 @@ function verifySupabaseIntegrationSources() {
   );
   assert.match(
     fs.readFileSync("supabase/functions/trigger-dispatch/index.ts", "utf8"),
-    /integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
+    /auth\/v1\/user[\s\S]*user_mismatch[\s\S]*integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
   );
   const runActionSource = fs.readFileSync(
     "supabase/functions/run-actions/index.ts",
@@ -3598,6 +3598,7 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
   assert.match(edgeHarnessSource, /verifyTriggerActionsFunction/);
   assert.match(edgeHarnessSource, /verifyRunActionsFunction/);
+  assert.match(edgeHarnessSource, /verifyTriggerDispatchFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyMcpBridgeFunction/);

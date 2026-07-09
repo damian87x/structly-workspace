@@ -2,12 +2,40 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
-function hasUserAuth(request: Request) {
+async function getAuthenticatedUserId(request) {
   const authorization = request.headers.get("authorization") || "";
-  return authorization.toLowerCase().startsWith("bearer ");
+  const endpoint = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+
+  if (!authorization.toLowerCase().startsWith("bearer ")) {
+    return { error: "missing_auth", status: 401, userId: null };
+  }
+
+  if (!endpoint || !anonKey) {
+    return { error: "auth_not_configured", status: 503, userId: null };
+  }
+
+  const response = await fetch(`${endpoint}/auth/v1/user`, {
+    headers: {
+      Authorization: authorization,
+      apikey: anonKey,
+    },
+  });
+
+  if (!response.ok) {
+    return { error: "invalid_auth", status: 401, userId: null };
+  }
+
+  const user = await response.json().catch(() => null);
+
+  if (!user?.id) {
+    return { error: "invalid_auth", status: 401, userId: null };
+  }
+
+  return { error: null, status: 200, userId: String(user.id) };
 }
 
-function getIdempotencyKey(body: Record<string, unknown>) {
+function getIdempotencyKey(body) {
   const source = typeof body.source === "string" ? body.source.trim() : "";
   const eventKey =
     typeof body.eventKey === "string" ? body.eventKey.trim() : "";
@@ -23,10 +51,12 @@ serve(async (request) => {
     });
   }
 
-  if (!hasUserAuth(request)) {
-    return new Response(JSON.stringify({ error: "missing_auth" }), {
+  const auth = await getAuthenticatedUserId(request);
+
+  if (auth.error || !auth.userId) {
+    return new Response(JSON.stringify({ error: auth.error }), {
       headers: jsonHeaders,
-      status: 401,
+      status: auth.status,
     });
   }
 
@@ -44,6 +74,13 @@ serve(async (request) => {
     return new Response(JSON.stringify({ error: "missing_trigger_scope" }), {
       headers: jsonHeaders,
       status: 400,
+    });
+  }
+
+  if (body.userId !== auth.userId) {
+    return new Response(JSON.stringify({ error: "user_mismatch" }), {
+      headers: jsonHeaders,
+      status: 403,
     });
   }
 
