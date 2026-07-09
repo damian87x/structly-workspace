@@ -265,6 +265,7 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Needs review:/);
   assert.match(appSource, /Duplicates:/);
   assert.match(appSource, /Source proof:/);
+  assert.match(appSource, /Period:/);
   assert.match(appSource, /Gross total:/);
   assert.match(appSource, /VAT total:/);
   assert.match(appSource, /Top category:/);
@@ -1059,6 +1060,12 @@ function verifyBuildSpreadsheetModule() {
     ],
     missingProofCount: 0,
     needsReviewCount: 0,
+    period: {
+      datedRowCount: 3,
+      endDate: "2026-07-03",
+      label: "2026-07",
+      startDate: "2026-07-01",
+    },
     ready: true,
     rowCount: 3,
     sourceProofCount: 3,
@@ -1228,6 +1235,46 @@ function verifyBuildSpreadsheetModule() {
   ]);
   assert.equal(missingProofSheet.summary.ready, false);
   assert.equal(missingProofSheet.summary.status, "needs_review");
+
+  const crossPeriodSheet = buildReceiptSheet([
+    {
+      sourceUri: "file://june-office.jpg",
+      fields: {
+        category: "Office",
+        date: "2026-06-30",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "June Office",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      sourceUri: "file://july-travel.jpg",
+      fields: {
+        category: "Travel",
+        date: "2026-07-01",
+        gross: 18,
+        net: 15,
+        vat: 3,
+        vendor: "July Travel",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ]);
+
+  assert.deepEqual(crossPeriodSheet.summary.period, {
+    datedRowCount: 2,
+    endDate: "2026-07-01",
+    label: "2026-06-30 to 2026-07-01",
+    startDate: "2026-06-30",
+  });
 }
 
 async function verifyExportShareModule() {
@@ -1357,6 +1404,7 @@ async function verifyExportReviewedReceiptsHelper() {
     "",
     "Status: Needs review",
     "Rows: 2",
+    "Period: 2026-07",
     "Rows with source proof: 2/2",
     "Gross total: 37.50",
     "Net total: 30.00",
@@ -1414,6 +1462,12 @@ async function verifyExportReviewedReceiptsHelper() {
     locationTotals: [],
     missingProofCount: 0,
     needsReviewCount: 1,
+    period: {
+      datedRowCount: 2,
+      endDate: "2026-07-08",
+      label: "2026-07",
+      startDate: "2026-07-07",
+    },
     ready: false,
     rowCount: 2,
     sourceProofCount: 2,
@@ -1448,6 +1502,19 @@ async function verifyExportReviewedReceiptsHelper() {
   assert.equal(injectedResult.summary.rowCount, 2);
   assert.equal(injectedResult.handoffNote, expectedHandoffNote);
   assert.equal(injectedResult.exportResult.uri, "file:///tmp/custom/fake.csv");
+
+  const defaultNameCalls = [];
+  await exportReviewedReceipts(receipts, {
+    async exportSheet(payload) {
+      defaultNameCalls.push(payload);
+      return { shared: true, uri: "file:///tmp/custom/default.csv" };
+    },
+  });
+
+  assert.deepEqual(defaultNameCalls[0], {
+    csv: expectedCsv,
+    filename: "reviewed-receipts-2026-07",
+  });
 }
 
 function createReviewRow(overrides = {}) {

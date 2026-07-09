@@ -182,6 +182,65 @@ function parseAmount(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeDate(value) {
+  const normalized = normalizeKeyPart(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+  const date = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() + 1 !== Number(month) ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getPeriodLabel(startDate, endDate) {
+  if (!startDate || !endDate) {
+    return "No dated rows";
+  }
+
+  if (startDate === endDate) {
+    return startDate;
+  }
+
+  if (startDate.slice(0, 7) === endDate.slice(0, 7)) {
+    return startDate.slice(0, 7);
+  }
+
+  return `${startDate} to ${endDate}`;
+}
+
+function buildPeriod(receipts) {
+  const dates = receipts
+    .map((receipt) => normalizeDate(getFields(receipt).date))
+    .filter(Boolean)
+    .sort();
+  const startDate = dates[0] || null;
+  const endDate = dates[dates.length - 1] || null;
+
+  return {
+    datedRowCount: dates.length,
+    endDate,
+    label: getPeriodLabel(startDate, endDate),
+    startDate,
+  };
+}
+
 function roundMoney(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -268,6 +327,7 @@ function buildSummary(receipts, validation) {
     },
   );
   const blockers = [];
+  const period = buildPeriod(receipts);
 
   if (validation.needsReviewCount > 0) {
     blockers.push(
@@ -305,6 +365,7 @@ function buildSummary(receipts, validation) {
     locationTotals: buildBreakdownRows(locationMap, "location"),
     missingProofCount: validation.missingProofCount,
     needsReviewCount: validation.needsReviewCount,
+    period,
     ready: receipts.length > 0 && blockers.length === 0,
     rowCount: receipts.length,
     sourceProofCount: receipts.length - validation.missingProofCount,

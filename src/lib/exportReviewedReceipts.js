@@ -45,6 +45,16 @@ function formatBreakdown(rows, labelKey) {
   });
 }
 
+function getDefaultExportFilename(summary) {
+  const label = summary?.period?.label;
+
+  if (!summary?.period?.startDate || !label) {
+    return DEFAULT_EXPORT_FILENAME;
+  }
+
+  return `${DEFAULT_EXPORT_FILENAME}-${label.replace(/\s+to\s+/g, "-to-")}`;
+}
+
 function buildHandoffNote(receipts, sheet) {
   const receiptList = getReceiptList(receipts);
   const summary = buildReceiptSummary(receiptList, sheet);
@@ -55,6 +65,7 @@ function buildHandoffNote(receipts, sheet) {
     "",
     `Status: ${status}`,
     `Rows: ${summary.rowCount}`,
+    `Period: ${summary.period?.label || "No dated rows"}`,
     `Rows with source proof: ${summary.sourceProofCount}/${summary.rowCount}`,
     `Gross total: ${formatMoney(summary.totalGross)}`,
     `Net total: ${formatMoney(summary.totalNet)}`,
@@ -81,12 +92,13 @@ function buildHandoffNote(receipts, sheet) {
 async function exportReviewedReceipts(receipts, options = {}) {
   const receiptList = getReceiptList(receipts);
   const sheet = buildReceiptSheet(receiptList);
+  const summary = buildReceiptSummary(receiptList, sheet);
   const handoffNote = buildHandoffNote(receiptList, sheet);
   const exportSheet = options.exportSheet || exportShare.exportSheet;
   const exportResult = await exportSheet(
     {
       csv: sheet.csv,
-      filename: options.filename || DEFAULT_EXPORT_FILENAME,
+      filename: options.filename || getDefaultExportFilename(summary),
     },
     {
       directory: options.directory,
@@ -99,7 +111,7 @@ async function exportReviewedReceipts(receipts, options = {}) {
     exportResult,
     handoffNote,
     sheet,
-    summary: buildReceiptSummary(receiptList, sheet),
+    summary,
   };
 }
 
