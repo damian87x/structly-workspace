@@ -1,4 +1,5 @@
 const assert = require("assert");
+const crypto = require("crypto");
 
 const REQUIRED_ENV = [
   "STRUCTLY_FUNCTIONS_URL",
@@ -13,6 +14,10 @@ const SCHEDULE_ENV = [
 
 const LOCATION_ENV = ["STRUCTLY_TEST_LOCATION_TRIGGER_ID"];
 const CODE_ENV = ["STRUCTLY_TEST_CODE_TRIGGER_ID"];
+const COMPOSIO_ENV = [
+  "STRUCTLY_TEST_COMPOSIO_TRIGGER_ID",
+  "STRUCTLY_TEST_COMPOSIO_USER_ID",
+];
 
 function getEnv(name) {
   const value = process.env[name];
@@ -29,6 +34,9 @@ function getConfig() {
 
   return {
     codeTriggerId: getEnv("STRUCTLY_TEST_CODE_TRIGGER_ID"),
+    composioTriggerId: getEnv("STRUCTLY_TEST_COMPOSIO_TRIGGER_ID"),
+    composioUserId: getEnv("STRUCTLY_TEST_COMPOSIO_USER_ID"),
+    composioWebhookSecret: getEnv("STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET"),
     functionsUrl,
     locationTriggerId: getEnv("STRUCTLY_TEST_LOCATION_TRIGGER_ID"),
     requireLive: process.argv.includes("--require-live"),
@@ -42,15 +50,18 @@ function getConfig() {
 async function callFunction({
   body,
   config,
+  headers = {},
   functionName,
   method = "POST",
+  rawBody = null,
   token = config.userToken,
 }) {
   const response = await fetch(`${config.functionsUrl}/${functionName}`, {
-    body: body ? JSON.stringify(body) : undefined,
+    body: rawBody || (body ? JSON.stringify(body) : undefined),
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      ...headers,
     },
     method,
   });
@@ -137,6 +148,59 @@ async function verifyCodeExecution(config) {
   return result.data;
 }
 
+function signComposioPayload({ body, secret, timestamp, webhookId }) {
+  return `v1,${crypto
+    .createHmac("sha256", secret)
+    .update(`${webhookId}.${timestamp}.${body}`)
+    .digest("base64")}`;
+}
+
+async function verifyComposioWebhook(config) {
+  const webhookId = `live-smoke-${Date.now()}`;
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const payload = {
+    data: {
+      source: "live-smoke",
+    },
+    id: webhookId,
+    metadata: {
+      trigger_slug: "STRUCTLY_LIVE_SMOKE",
+      user_id: config.composioUserId,
+    },
+    structly_trigger_id: config.composioTriggerId,
+    type: "composio.trigger.message",
+  };
+  const body = JSON.stringify(payload);
+  const signature = config.composioWebhookSecret
+    ? signComposioPayload({
+        body,
+        secret: config.composioWebhookSecret,
+        timestamp,
+        webhookId,
+      })
+    : "live-smoke-signature";
+  const result = await callFunction({
+    config,
+    functionName: "composio-webhook",
+    headers: {
+      "webhook-id": webhookId,
+      "webhook-signature": signature,
+      "webhook-timestamp": timestamp,
+    },
+    rawBody: body,
+  });
+
+  assert.equal(
+    result.status,
+    200,
+    `composio-webhook failed: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.data.provider, "composio");
+  assert.equal(result.data.eventKey, webhookId);
+
+  return result.data;
+}
+
 async function verifyScheduleJob(config) {
   const eventKey = `live-smoke-${Date.now()}`;
   const result = await callFunction({
@@ -186,6 +250,10 @@ async function main() {
 
   if (missingEnv(CODE_ENV).length === 0) {
     results.codeExecution = await verifyCodeExecution(config);
+  }
+
+  if (missingEnv(COMPOSIO_ENV).length === 0) {
+    results.composio = await verifyComposioWebhook(config);
   }
 
   if (missingEnv(SCHEDULE_ENV).length === 0) {

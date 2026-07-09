@@ -396,6 +396,9 @@ function verifyBackendFunctionSources() {
   assert.match(codeSource, /trigger_runs/);
   assert.match(codeSource, /mobileExecution: false/);
   assert.match(codeSource, /approval_required/);
+  assert.match(read("supabase/functions/composio-webhook/index.ts"), /COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(read("supabase/functions/composio-webhook/index.ts"), /trigger_runs/);
+  assert.match(edgeHarnessSource, /verifyComposioWebhookFunction/);
   assert.match(statusSource, /auth\/v1\/user/);
   assert.match(statusSource, /user_id=eq\.\$\{userFilter\}/);
   assert.match(statusSource, /isProviderTrigger/);

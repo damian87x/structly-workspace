@@ -43,6 +43,7 @@ Backend automation must continue without the mobile app running.
 Composio and MCP are backend adapters:
 
 - Composio events enter through signed backend webhooks.
+- Production Composio webhooks must set `COMPOSIO_WEBHOOK_SECRET` and verify the raw-body signature before parsing.
 - MCP tools are exposed through a backend bridge and approved catalog.
 - Mobile sees only approved catalogs, statuses, approvals, and histories.
 - External side effects require policy checks and, when configured, user approval.

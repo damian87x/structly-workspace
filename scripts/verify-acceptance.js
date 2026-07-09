@@ -2733,9 +2733,14 @@ function verifyComposioWebhookBackendOnlySource() {
   );
   assert.equal(normalizeComposioEvent({}).source, "composio");
   assert.match(functionSource, /signatureHeaders/);
-  assert.match(functionSource, /hasReplayTimestamp/);
+  assert.match(functionSource, /COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(functionSource, /webhook-signature/);
+  assert.match(functionSource, /webhook-id/);
+  assert.match(functionSource, /webhook-timestamp/);
+  assert.match(functionSource, /verifyWebhookSignature/);
   assert.match(functionSource, /timestampIsFresh/);
   assert.match(functionSource, /integration_events/);
+  assert.match(functionSource, /trigger_runs/);
   assert.match(functionSource, /invalid_signature/);
   assert.match(functionSource, /eventKey/);
   assert.doesNotMatch(appSource, /COMPOSIO|service_role|composio-webhook/i);
@@ -3337,6 +3342,7 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyStatusRead/);
   assert.match(liveSmokeSource, /verifyLocationSuggestion/);
   assert.match(liveSmokeSource, /verifyCodeExecution/);
+  assert.match(liveSmokeSource, /verifyComposioWebhook/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
   assert.match(liveSmokeSource, /--require-live/);
   assert.match(pixelSmokeSource, /adb/);
@@ -3350,6 +3356,7 @@ function verifyE2EHarnessSource() {
   assert.match(ciDocs, /workflow` scope/);
   assert.match(liveSmokeDocs, /npm run test:live/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);

@@ -27,6 +27,7 @@ function loadEdgeHandler(path, { env = DEFAULT_ENV, fetchImpl } = {}) {
     console,
     crypto: {
       randomUUID: crypto.randomUUID,
+      subtle: crypto.webcrypto.subtle,
     },
     Deno: {
       env: {
@@ -38,6 +39,8 @@ function loadEdgeHandler(path, { env = DEFAULT_ENV, fetchImpl } = {}) {
     fetch: fetchImpl,
     Request,
     Response,
+    TextEncoder,
+    btoa,
     serve(nextHandler) {
       handler = nextHandler;
     },
@@ -47,6 +50,13 @@ function loadEdgeHandler(path, { env = DEFAULT_ENV, fetchImpl } = {}) {
   assert.equal(typeof handler, "function");
 
   return handler;
+}
+
+function signComposioPayload({ body, secret, timestamp, webhookId }) {
+  return `v1,${crypto
+    .createHmac("sha256", secret)
+    .update(`${webhookId}.${timestamp}.${body}`)
+    .digest("base64")}`;
 }
 
 function createJsonRequest({ body, headers = {}, method = "POST" } = {}) {
@@ -317,11 +327,93 @@ async function verifyStatusReadFunction() {
   );
 }
 
+async function verifyComposioWebhookFunction() {
+  const calls = [];
+  const secret = "composio-secret";
+  const handler = loadEdgeHandler("supabase/functions/composio-webhook/index.ts", {
+    env: {
+      ...DEFAULT_ENV,
+      COMPOSIO_WEBHOOK_SECRET: secret,
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({
+        body: parseBody(options),
+        method: options.method || "GET",
+        url: String(url),
+      });
+      return jsonResponse([]);
+    },
+  });
+  const payload = {
+    data: {
+      message: "hello",
+    },
+    id: "msg-live-smoke",
+    metadata: {
+      trigger_slug: "GMAIL_NEW_EMAIL",
+      user_id: "user-1",
+    },
+    structly_trigger_id: "receipt-trigger",
+    type: "composio.trigger.message",
+  };
+  const body = JSON.stringify(payload);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const webhookId = "webhook-message-1";
+  const invalid = await readJson(
+    await handler(
+      new Request("https://edge.example.test", {
+        body,
+        headers: {
+          "Content-Type": "application/json",
+          "webhook-id": webhookId,
+          "webhook-signature": "v1,invalid",
+          "webhook-timestamp": timestamp,
+        },
+        method: "POST",
+      }),
+    ),
+  );
+
+  assert.equal(invalid.status, 401);
+  assert.equal(calls.length, 0);
+
+  const accepted = await readJson(
+    await handler(
+      new Request("https://edge.example.test", {
+        body,
+        headers: {
+          "Content-Type": "application/json",
+          "webhook-id": webhookId,
+          "webhook-signature": signComposioPayload({
+            body,
+            secret,
+            timestamp,
+            webhookId,
+          }),
+          "webhook-timestamp": timestamp,
+        },
+        method: "POST",
+      }),
+    ),
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.provider, "composio");
+  assert.ok(calls.some((call) => call.url.includes("/integration_events")));
+  assert.ok(calls.some((call) => call.url.includes("/trigger_runs")));
+  assert.ok(calls.every((call) => call.body.user_id === "user-1"));
+
+  const runCall = calls.find((call) => call.url.includes("/trigger_runs"));
+  assert.equal(runCall.body.idempotency_key, "composio:GMAIL_NEW_EMAIL:msg-live-smoke");
+  assert.equal(runCall.body.trigger_id, "receipt-trigger");
+}
+
 async function main() {
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyCodeExecutionFunction();
   await verifyStatusReadFunction();
+  await verifyComposioWebhookFunction();
   console.log("Edge function E2E checks passed.");
 }
 

@@ -29,6 +29,14 @@ Code execution request:
 STRUCTLY_TEST_CODE_TRIGGER_ID="code-trigger-id"
 ```
 
+Composio webhook:
+
+```sh
+STRUCTLY_TEST_COMPOSIO_TRIGGER_ID="structly-trigger-definition-id"
+STRUCTLY_TEST_COMPOSIO_USER_ID="user-id"
+STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET="composio-webhook-secret-if-configured"
+```
+
 Schedule worker:
 
 ```sh
@@ -41,4 +49,5 @@ STRUCTLY_TEST_SCHEDULE_TOKEN="schedule-worker-token"
 - `status-read` accepts the user token and returns backend status.
 - `location-suggestions` records a coarse Pixel-style location suggestion when a trigger id is configured.
 - `code-execution-bridge` creates an approval-required backend-owned code request when a trigger id is configured.
+- `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.
 - `schedule-jobs` accepts only the worker token and queues one idempotent schedule event when schedule env is configured.
