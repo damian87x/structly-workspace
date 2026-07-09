@@ -376,6 +376,7 @@ function verifyE2EFlow() {
 function verifyBackendFunctionSources() {
   const heartbeatSource = read("supabase/functions/heartbeat-ingest/index.ts");
   const mobileSyncSource = read("supabase/functions/mobile-sync/index.ts");
+  const runActionSource = read("supabase/functions/run-actions/index.ts");
   const triggerActionSource = read("supabase/functions/trigger-actions/index.ts");
   const scheduleSource = read("supabase/functions/schedule-jobs/index.ts");
   const locationSource = read("supabase/functions/location-suggestions/index.ts");
@@ -393,6 +394,12 @@ function verifyBackendFunctionSources() {
   assert.match(mobileSyncSource, /trigger_definitions/);
   assert.match(mobileSyncSource, /trigger_runs/);
   assert.doesNotMatch(mobileSyncSource, /select=\*/);
+  assert.match(runActionSource, /auth\/v1\/user/);
+  assert.match(runActionSource, /allowedActions/);
+  assert.match(runActionSource, /trigger_runs/);
+  assert.match(runActionSource, /user_id=eq\.\$\{userFilter\}/);
+  assert.match(runActionSource, /status=eq\.approval_required/);
+  assert.match(runActionSource, /externalActionReady/);
   assert.match(triggerActionSource, /auth\/v1\/user/);
   assert.match(triggerActionSource, /allowedActions/);
   assert.match(triggerActionSource, /allowedPatchKeys/);
@@ -432,6 +439,7 @@ function verifyBackendFunctionSources() {
   assert.match(edgeHarnessSource, /verifyMobileSyncFunction/);
   assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
   assert.match(edgeHarnessSource, /verifyTriggerActionsFunction/);
+  assert.match(edgeHarnessSource, /verifyRunActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);

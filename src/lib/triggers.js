@@ -98,6 +98,15 @@ function deleteTriggerPayload(trigger) {
   return createTriggerMutationPayload("delete", trigger);
 }
 
+function createRunApprovalPayload(run, approved) {
+  return {
+    action: approved ? "approve" : "deny",
+    runId: run?.id || null,
+    triggerId: run?.triggerId || null,
+    userId: run?.userId || null,
+  };
+}
+
 function setTriggerPaused(trigger, paused) {
   return {
     ...trigger,
@@ -227,6 +236,7 @@ module.exports = {
   approveTriggerRun,
   createTriggerDefinition,
   createTriggerPayload,
+  createRunApprovalPayload,
   createTriggerMutationPayload,
   createTriggerRun,
   deleteTrigger,

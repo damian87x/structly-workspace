@@ -382,6 +382,113 @@ async function verifyTriggerActionsFunction() {
   assert.equal(patchCall.body.status, "paused");
 }
 
+async function verifyRunActionsFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/run-actions/index.ts", {
+    fetchImpl: async (url, options = {}) => {
+      const requestUrl = String(url);
+
+      if (requestUrl.endsWith("/auth/v1/user")) {
+        return options.headers?.Authorization === "Bearer user-token"
+          ? jsonResponse({ id: "user-1" })
+          : jsonResponse({ error: "invalid" }, 401);
+      }
+
+      const body = parseBody(options);
+
+      calls.push({
+        body,
+        headers: options.headers || {},
+        method: options.method || "GET",
+        url: requestUrl,
+      });
+
+      if (requestUrl.includes("/trigger_runs")) {
+        return jsonResponse([
+          {
+            id: "run-1",
+            status: body.status,
+            trigger_id: "trigger-1",
+            updated_at: "2026-07-09T12:00:00.000Z",
+            user_id: "user-1",
+          },
+        ]);
+      }
+
+      return jsonResponse([]);
+    },
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: { action: "approve", runId: "run-1" },
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const mismatch = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "approve",
+          runId: "run-1",
+          userId: "user-2",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(mismatch.status, 403);
+  assert.equal(mismatch.data.error, "user_mismatch");
+  assert.equal(calls.length, 0);
+
+  const approved = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "approve",
+          runId: "run-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const approveCall = calls.find((call) => call.method === "PATCH");
+
+  assert.equal(approved.status, 200);
+  assert.equal(approved.data.run.status, "queued");
+  assert.ok(approveCall.url.includes("id=eq.run-1"));
+  assert.ok(approveCall.url.includes("user_id=eq.user-1"));
+  assert.ok(approveCall.url.includes("status=eq.approval_required"));
+  assert.equal(approveCall.headers.Authorization, "Bearer service-key");
+  assert.equal(approveCall.body.status, "queued");
+  assert.equal(approveCall.body.result.externalActionReady, true);
+
+  const denied = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "deny",
+          runId: "run-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const denyCall = calls.find((call) => call.body.status === "denied");
+
+  assert.equal(denied.status, 200);
+  assert.equal(denyCall.body.result.externalActionReady, false);
+}
+
 async function verifyLocationSuggestionsFunction() {
   const calls = [];
   const handler = loadEdgeHandler(
@@ -722,6 +829,7 @@ async function main() {
   await verifyMobileSyncFunction();
   await verifyHeartbeatIngestFunction();
   await verifyTriggerActionsFunction();
+  await verifyRunActionsFunction();
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyCodeExecutionFunction();

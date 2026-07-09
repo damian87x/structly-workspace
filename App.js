@@ -39,6 +39,8 @@ import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
 import { createMobileDeviceHeartbeatPayload } from "./src/lib/mobileIntegrationRuntime";
 import {
+  TRIGGER_RUN_STATUS,
+  createRunApprovalPayload,
   createTriggerPayload,
   deleteTriggerPayload,
   pauseTriggerPayload,
@@ -237,10 +239,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [exportResult, setExportResult] = useState(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRunActionRunning, setIsRunActionRunning] = useState(false);
   const [isTriggerActionRunning, setIsTriggerActionRunning] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
+  const [runActionError, setRunActionError] = useState(null);
+  const [runActionMessage, setRunActionMessage] = useState(null);
   const [triggerActionError, setTriggerActionError] = useState(null);
   const [triggerActionMessage, setTriggerActionMessage] = useState(null);
   const [backendStatus, setBackendStatus] = useState({
@@ -666,6 +671,38 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     }
   }
 
+  async function handleRunAction(run, approved) {
+    if (!run || isRunActionRunning) {
+      return;
+    }
+
+    setRunActionError(null);
+    setRunActionMessage(null);
+    setIsRunActionRunning(true);
+
+    try {
+      const result = await callIntegrationFunction({
+        anonKey,
+        body: createRunApprovalPayload(run, approved),
+        config: backendConfig,
+        functionName: "run-actions",
+        session,
+      });
+
+      if (result.error) {
+        setRunActionError("Unable to update run.");
+        return;
+      }
+
+      setRunActionMessage(approved ? "Run approved." : "Run denied.");
+      await refreshSyncedTriggers();
+    } catch (error) {
+      setRunActionError("Unable to update run.");
+    } finally {
+      setIsRunActionRunning(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.captureContainer}>
@@ -766,10 +803,42 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           ) : null}
           <Text style={styles.panelMeta}>Run history</Text>
           {integrationDashboard.runHistory.map((run) => (
-            <Text key={run.id} style={styles.panelMeta}>
-              {run.status}
-            </Text>
+            <View key={run.id} style={styles.runRow}>
+              <Text style={styles.panelMeta}>{run.status}</Text>
+              {run.status === TRIGGER_RUN_STATUS.APPROVAL_REQUIRED ? (
+                <View style={styles.integrationControls}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isRunActionRunning }}
+                    disabled={isRunActionRunning}
+                    onPress={() => handleRunAction(run, true)}
+                    style={[
+                      styles.smallButton,
+                      isRunActionRunning ? styles.smallButtonDisabled : null,
+                    ]}
+                  >
+                    <Text style={styles.smallButtonText}>Approve</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isRunActionRunning }}
+                    disabled={isRunActionRunning}
+                    onPress={() => handleRunAction(run, false)}
+                    style={[
+                      styles.smallButton,
+                      isRunActionRunning ? styles.smallButtonDisabled : null,
+                    ]}
+                  >
+                    <Text style={styles.smallButtonText}>Deny</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
           ))}
+          {runActionMessage ? (
+            <Text style={styles.panelMeta}>{runActionMessage}</Text>
+          ) : null}
+          {runActionError ? <Text style={styles.error}>{runActionError}</Text> : null}
         </View>
 
         {receipt ? (
@@ -1150,6 +1219,12 @@ const styles = StyleSheet.create({
     color: "#B45309",
     fontSize: 16,
     fontWeight: "700",
+  },
+  runRow: {
+    borderTopColor: "#E5E7EB",
+    borderTopWidth: 1,
+    gap: 8,
+    paddingTop: 10,
   },
   integrationControls: {
     flexDirection: "row",

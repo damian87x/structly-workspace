@@ -76,6 +76,7 @@ const {
   TRIGGER_RUN_STATUS,
   TRIGGER_STATUS,
   approveTriggerRun,
+  createRunApprovalPayload,
   createTriggerDefinition,
   createTriggerPayload,
   createTriggerRun,
@@ -2354,6 +2355,7 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /foreground\/resume device heartbeats/);
   assert.match(roadmap, /user-scoped mobile sync/);
   assert.match(roadmap, /trigger create\/edit\/pause\/resume\/delete/);
+  assert.match(roadmap, /approve or deny approval-required trigger runs/);
   assert.match(roadmap, /npm run test:e2e/);
   assert.match(roadmap, /Mobile bundle\/env audit/);
   assert.match(pixelPlan, /Pixel device/);
@@ -2587,6 +2589,13 @@ function verifyTriggerLifecycleModule() {
   assert.equal(approveTriggerRun(run, false).status, TRIGGER_RUN_STATUS.DENIED);
   assert.equal(approveTriggerRun(run, false).details.externalActionReady, false);
   assert.equal(approveTriggerRun(run, true).details.externalActionReady, true);
+  assert.deepEqual(createRunApprovalPayload(run, true), {
+    action: "approve",
+    runId: "run-1",
+    triggerId: "trigger-1",
+    userId: "user-1",
+  });
+  assert.equal(createRunApprovalPayload(run, false).action, "deny");
   assert.equal(getTriggerDisplayStatus(trigger, [run]), "Needs approval");
   assert.equal(createTriggerPayload(trigger).action, "create");
   assert.equal(updateTriggerPayload(trigger, { name: "Updated" }).action, "update");
@@ -3262,6 +3271,7 @@ function verifySupabaseIntegrationSources() {
   const functions = [
     "mobile-sync",
     "heartbeat-ingest",
+    "run-actions",
     "trigger-actions",
     "trigger-dispatch",
     "status-read",
@@ -3319,6 +3329,16 @@ function verifySupabaseIntegrationSources() {
     fs.readFileSync("supabase/functions/trigger-dispatch/index.ts", "utf8"),
     /integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
   );
+  const runActionSource = fs.readFileSync(
+    "supabase/functions/run-actions/index.ts",
+    "utf8",
+  );
+  assert.match(runActionSource, /auth\/v1\/user/);
+  assert.match(runActionSource, /allowedActions/);
+  assert.match(runActionSource, /trigger_runs/);
+  assert.match(runActionSource, /user_id=eq\.\$\{userFilter\}/);
+  assert.match(runActionSource, /status=eq\.approval_required/);
+  assert.match(runActionSource, /externalActionReady/);
   const triggerActionSource = fs.readFileSync(
     "supabase/functions/trigger-actions/index.ts",
     "utf8",
@@ -3397,7 +3417,13 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /functionName: "status-read"/);
   assert.match(appSource, /functionName: "heartbeat-ingest"/);
   assert.match(appSource, /functionName: "mobile-sync"/);
+  assert.match(appSource, /functionName: "run-actions"/);
   assert.match(appSource, /functionName: "trigger-actions"/);
+  assert.match(appSource, /handleRunAction/);
+  assert.match(appSource, /createRunApprovalPayload/);
+  assert.match(appSource, /TRIGGER_RUN_STATUS\.APPROVAL_REQUIRED/);
+  assert.match(appSource, /Approve/);
+  assert.match(appSource, /Deny/);
   assert.match(appSource, /createMobileDeviceHeartbeatPayload/);
   assert.match(appSource, /shouldSendHeartbeat/);
   assert.match(appSource, /handleTriggerAction/);
@@ -3475,6 +3501,7 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyMobileSyncFunction/);
   assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
   assert.match(edgeHarnessSource, /verifyTriggerActionsFunction/);
+  assert.match(edgeHarnessSource, /verifyRunActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);

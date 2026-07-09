@@ -58,6 +58,7 @@ Scheduled jobs, coarse location suggestions, and sandboxed code execution are ba
 - Approved code execution is performed only by a backend runner using a configured Daytona sandbox id and runner token.
 - The mobile app sends foreground/resume device heartbeats and hydrates trigger/run history through user-scoped mobile sync.
 - The mobile app manages trigger create/edit/pause/resume/delete through authenticated, user-scoped backend actions.
+- The mobile app can approve or deny approval-required trigger runs before backend side effects continue.
 - Pixel/Android validation is a release gate because background work and background location are platform-constrained.
 
 ## Release Gates
