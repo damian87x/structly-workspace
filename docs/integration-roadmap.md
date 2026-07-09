@@ -55,6 +55,7 @@ Scheduled jobs, coarse location suggestions, and sandboxed code execution are ba
 - Schedule ticks enter as durable integration events, then fan out through trigger runs with idempotency keys.
 - Location suggestions use coarse coordinates and user consent. They are suggestions for receipt context, not continuous tracking guarantees.
 - Daytona-style code execution is represented as an approval-required backend request. Mobile never executes code and never carries sandbox API keys.
+- Approved code execution is performed only by a backend runner using a configured Daytona sandbox id and runner token.
 - Pixel/Android validation is a release gate because background work and background location are platform-constrained.
 
 ## Release Gates

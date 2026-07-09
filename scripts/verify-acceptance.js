@@ -3177,6 +3177,7 @@ function verifySupabaseIntegrationSources() {
     "schedule-jobs",
     "location-suggestions",
     "code-execution-bridge",
+    "code-execution-runner",
   ];
 
   assert.ok(migrationFiles.length > 0);
@@ -3254,6 +3255,16 @@ function verifySupabaseIntegrationSources() {
     fs.readFileSync("supabase/functions/code-execution-bridge/index.ts", "utf8"),
     /auth\/v1\/user[\s\S]*user_mismatch[\s\S]*DAYTONA_API_KEY[\s\S]*code_execution_requests[\s\S]*integration_events[\s\S]*trigger_runs/,
   );
+  const codeRunnerSource = fs.readFileSync(
+    "supabase/functions/code-execution-runner/index.ts",
+    "utf8",
+  );
+  assert.match(codeRunnerSource, /CODE_EXECUTION_RUNNER_TOKEN/);
+  assert.match(codeRunnerSource, /DAYTONA_API_KEY/);
+  assert.match(codeRunnerSource, /proxy\.app\.daytona\.io/);
+  assert.match(codeRunnerSource, /\/process\/code-run/);
+  assert.match(codeRunnerSource, /\/process\/execute/);
+  assert.match(codeRunnerSource, /code_execution_requests/);
 }
 
 function verifyIntegrationUiSource() {
@@ -3337,13 +3348,17 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
+  assert.match(edgeHarnessSource, /verifyCodeExecutionRunnerFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
   assert.match(liveSmokeSource, /STRUCTLY_FUNCTIONS_URL/);
   assert.match(liveSmokeSource, /verifyStatusRead/);
   assert.match(liveSmokeSource, /verifyLocationSuggestion/);
   assert.match(liveSmokeSource, /verifyCodeExecution/);
+  assert.match(liveSmokeSource, /verifyDaytonaExecution/);
   assert.match(liveSmokeSource, /verifyComposioWebhook/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(liveSmokeSource, /--require-live/);
   assert.match(pixelSmokeSource, /adb/);
   assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
@@ -3358,6 +3373,8 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);
   assert.match(pixelSmokeDocs, /STRUCTLY_ANDROID_PACKAGE/);

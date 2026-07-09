@@ -377,6 +377,7 @@ function verifyBackendFunctionSources() {
   const scheduleSource = read("supabase/functions/schedule-jobs/index.ts");
   const locationSource = read("supabase/functions/location-suggestions/index.ts");
   const codeSource = read("supabase/functions/code-execution-bridge/index.ts");
+  const runnerSource = read("supabase/functions/code-execution-runner/index.ts");
   const edgeHarnessSource = read("scripts/verify-edge-functions.js");
   const statusSource = read("supabase/functions/status-read/index.ts");
 
@@ -396,6 +397,12 @@ function verifyBackendFunctionSources() {
   assert.match(codeSource, /trigger_runs/);
   assert.match(codeSource, /mobileExecution: false/);
   assert.match(codeSource, /approval_required/);
+  assert.match(runnerSource, /CODE_EXECUTION_RUNNER_TOKEN/);
+  assert.match(runnerSource, /DAYTONA_API_KEY/);
+  assert.match(runnerSource, /proxy\.app\.daytona\.io/);
+  assert.match(runnerSource, /\/process\/code-run/);
+  assert.match(runnerSource, /\/process\/execute/);
+  assert.match(runnerSource, /code_execution_requests/);
   assert.match(read("supabase/functions/composio-webhook/index.ts"), /COMPOSIO_WEBHOOK_SECRET/);
   assert.match(read("supabase/functions/composio-webhook/index.ts"), /trigger_runs/);
   assert.match(edgeHarnessSource, /verifyComposioWebhookFunction/);
@@ -407,6 +414,7 @@ function verifyBackendFunctionSources() {
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
+  assert.match(edgeHarnessSource, /verifyCodeExecutionRunnerFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
 }
 

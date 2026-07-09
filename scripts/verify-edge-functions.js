@@ -278,6 +278,89 @@ async function verifyCodeExecutionFunction() {
   assert.equal(runCall.body.status, "approval_required");
 }
 
+async function verifyCodeExecutionRunnerFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler(
+    "supabase/functions/code-execution-runner/index.ts",
+    {
+      env: {
+        ...DEFAULT_ENV,
+        CODE_EXECUTION_RUNNER_TOKEN: "runner-token",
+        DAYTONA_SANDBOX_ID: "sandbox-1",
+      },
+      fetchImpl: async (url, options = {}) => {
+        const requestUrl = String(url);
+
+        calls.push({
+          body: parseBody(options),
+          headers: options.headers || {},
+          method: options.method || "GET",
+          url: requestUrl,
+        });
+
+        if (requestUrl.includes("proxy.app.daytona.io")) {
+          return jsonResponse({ result: "ok" });
+        }
+
+        return jsonResponse({});
+      },
+    },
+  );
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          code: "console.log('blocked')",
+          language: "typescript",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const accepted = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          code: "console.log('ok')",
+          environment: {
+            API_TOKEN: "must-not-leak",
+            NODE_ENV: "test",
+          },
+          language: "typescript",
+          requestId: "code-request-1",
+          timeoutSeconds: 5,
+        },
+        headers: { Authorization: "Bearer runner-token" },
+      }),
+    ),
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.status, "succeeded");
+
+  const daytonaCall = calls.find((call) =>
+    call.url.includes("/process/code-run"),
+  );
+  const patchCalls = calls.filter((call) =>
+    call.url.includes("/code_execution_requests"),
+  );
+
+  assert.ok(daytonaCall);
+  assert.equal(daytonaCall.headers.Authorization, "Bearer daytona-key");
+  assert.equal(daytonaCall.body.code, "console.log('ok')");
+  assert.equal(daytonaCall.body.language, "typescript");
+  assert.equal(daytonaCall.body.envs.API_TOKEN, undefined);
+  assert.equal(daytonaCall.body.envs.NODE_ENV, "test");
+  assert.equal(daytonaCall.body.timeout, 5);
+  assert.equal(patchCalls.length, 2);
+  assert.equal(patchCalls[0].body.status, "running");
+  assert.equal(patchCalls[1].body.status, "succeeded");
+}
+
 async function verifyStatusReadFunction() {
   const calls = [];
   const handler = loadEdgeHandler("supabase/functions/status-read/index.ts", {
@@ -412,6 +495,7 @@ async function main() {
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyCodeExecutionFunction();
+  await verifyCodeExecutionRunnerFunction();
   await verifyStatusReadFunction();
   await verifyComposioWebhookFunction();
   console.log("Edge function E2E checks passed.");

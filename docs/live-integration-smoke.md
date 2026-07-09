@@ -29,6 +29,13 @@ Code execution request:
 STRUCTLY_TEST_CODE_TRIGGER_ID="code-trigger-id"
 ```
 
+Approved Daytona execution:
+
+```sh
+STRUCTLY_TEST_CODE_RUNNER_TOKEN="backend-runner-token"
+STRUCTLY_TEST_DAYTONA_SANDBOX_ID="daytona-sandbox-id"
+```
+
 Composio webhook:
 
 ```sh
@@ -49,5 +56,6 @@ STRUCTLY_TEST_SCHEDULE_TOKEN="schedule-worker-token"
 - `status-read` accepts the user token and returns backend status.
 - `location-suggestions` records a coarse Pixel-style location suggestion when a trigger id is configured.
 - `code-execution-bridge` creates an approval-required backend-owned code request when a trigger id is configured.
+- `code-execution-runner` runs approved TypeScript code inside the configured Daytona sandbox when runner env is configured.
 - `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.
 - `schedule-jobs` accepts only the worker token and queues one idempotent schedule event when schedule env is configured.

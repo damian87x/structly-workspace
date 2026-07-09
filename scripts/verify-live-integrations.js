@@ -14,6 +14,10 @@ const SCHEDULE_ENV = [
 
 const LOCATION_ENV = ["STRUCTLY_TEST_LOCATION_TRIGGER_ID"];
 const CODE_ENV = ["STRUCTLY_TEST_CODE_TRIGGER_ID"];
+const DAYTONA_ENV = [
+  "STRUCTLY_TEST_CODE_RUNNER_TOKEN",
+  "STRUCTLY_TEST_DAYTONA_SANDBOX_ID",
+];
 const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_TRIGGER_ID",
   "STRUCTLY_TEST_COMPOSIO_USER_ID",
@@ -34,10 +38,12 @@ function getConfig() {
 
   return {
     codeTriggerId: getEnv("STRUCTLY_TEST_CODE_TRIGGER_ID"),
+    codeRunnerToken: getEnv("STRUCTLY_TEST_CODE_RUNNER_TOKEN"),
     composioTriggerId: getEnv("STRUCTLY_TEST_COMPOSIO_TRIGGER_ID"),
     composioUserId: getEnv("STRUCTLY_TEST_COMPOSIO_USER_ID"),
     composioWebhookSecret: getEnv("STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET"),
     functionsUrl,
+    daytonaSandboxId: getEnv("STRUCTLY_TEST_DAYTONA_SANDBOX_ID"),
     locationTriggerId: getEnv("STRUCTLY_TEST_LOCATION_TRIGGER_ID"),
     requireLive: process.argv.includes("--require-live"),
     scheduleToken: getEnv("STRUCTLY_TEST_SCHEDULE_TOKEN"),
@@ -148,6 +154,35 @@ async function verifyCodeExecution(config) {
   return result.data;
 }
 
+async function verifyDaytonaExecution(config) {
+  const result = await callFunction({
+    body: {
+      code: "console.log('structly daytona live smoke')",
+      environment: {
+        API_TOKEN: "must-not-persist",
+        NODE_ENV: "live-smoke",
+      },
+      language: "typescript",
+      sandboxId: config.daytonaSandboxId,
+      timeoutSeconds: 5,
+    },
+    config,
+    functionName: "code-execution-runner",
+    token: config.codeRunnerToken,
+  });
+
+  assert.equal(
+    result.status,
+    200,
+    `code-execution-runner failed: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.data.mobileExecution, false);
+  assert.equal(result.data.provider, "daytona");
+  assert.equal(result.data.status, "succeeded");
+
+  return result.data;
+}
+
 function signComposioPayload({ body, secret, timestamp, webhookId }) {
   return `v1,${crypto
     .createHmac("sha256", secret)
@@ -250,6 +285,10 @@ async function main() {
 
   if (missingEnv(CODE_ENV).length === 0) {
     results.codeExecution = await verifyCodeExecution(config);
+  }
+
+  if (missingEnv(DAYTONA_ENV).length === 0) {
+    results.daytonaExecution = await verifyDaytonaExecution(config);
   }
 
   if (missingEnv(COMPOSIO_ENV).length === 0) {
