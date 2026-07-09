@@ -90,6 +90,23 @@ function buildNeedsReviewRows(receipts) {
     .filter(Boolean);
 }
 
+function hasSourceProof(receipt) {
+  return Boolean(receipt?.sourceUri || receipt?.imageUri || receipt?.uri);
+}
+
+function buildMissingProofRows(receipts) {
+  return receipts
+    .map((receipt, index) =>
+      hasSourceProof(receipt)
+        ? null
+        : {
+            index,
+            rowNumber: index + 1,
+          },
+    )
+    .filter(Boolean);
+}
+
 function normalizeKeyPart(value) {
   if (value === null || value === undefined) {
     return null;
@@ -270,6 +287,15 @@ function buildSummary(receipts, validation) {
     );
   }
 
+  if (validation.missingProofCount > 0) {
+    blockers.push(
+      `${validation.missingProofCount} ${pluralize(
+        validation.missingProofCount,
+        "row",
+      )} missing source proof`,
+    );
+  }
+
   return {
     billableTotals: buildBreakdownRows(billableMap, "billableClient"),
     blockerCount: blockers.length,
@@ -277,9 +303,11 @@ function buildSummary(receipts, validation) {
     categoryTotals: buildBreakdownRows(categoryMap, "category"),
     duplicateCount: validation.duplicateCount,
     locationTotals: buildBreakdownRows(locationMap, "location"),
+    missingProofCount: validation.missingProofCount,
     needsReviewCount: validation.needsReviewCount,
     ready: receipts.length > 0 && blockers.length === 0,
     rowCount: receipts.length,
+    sourceProofCount: receipts.length - validation.missingProofCount,
     status:
       receipts.length === 0
         ? READY_STATUS.EMPTY
@@ -310,9 +338,12 @@ function buildReceiptSheet(receipts) {
   const receiptList = Array.isArray(receipts) ? receipts : [];
   const needsReviewRows = buildNeedsReviewRows(receiptList);
   const duplicates = buildDuplicates(receiptList);
+  const missingProofRows = buildMissingProofRows(receiptList);
   const validation = {
     duplicateCount: duplicates.length,
     duplicates,
+    missingProofCount: missingProofRows.length,
+    missingProofRows,
     needsReviewCount: needsReviewRows.length,
     needsReviewRows,
   };

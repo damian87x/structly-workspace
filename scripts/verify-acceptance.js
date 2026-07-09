@@ -264,6 +264,7 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Rows:/);
   assert.match(appSource, /Needs review:/);
   assert.match(appSource, /Duplicates:/);
+  assert.match(appSource, /Source proof:/);
   assert.match(appSource, /Gross total:/);
   assert.match(appSource, /VAT total:/);
   assert.match(appSource, /Top category:/);
@@ -950,6 +951,7 @@ async function verifyConfirmReceiptExtractionHelper() {
 function verifyBuildSpreadsheetModule() {
   const cleanSheet = buildReceiptSheet([
     {
+      sourceUri: "file://acme-supplies.jpg",
       fields: {
         category: "Office",
         date: "2026-07-01",
@@ -964,6 +966,7 @@ function verifyBuildSpreadsheetModule() {
       },
     },
     {
+      sourceUri: "file://enriched-taxi.jpg",
       context: {
         billable: {
           billable: true,
@@ -991,6 +994,7 @@ function verifyBuildSpreadsheetModule() {
       },
     },
     {
+      sourceUri: "file://comma-quote.jpg",
       fields: {
         category: "Meals, team",
         date: "2026-07-02",
@@ -1014,8 +1018,10 @@ function verifyBuildSpreadsheetModule() {
   ]);
   assert.deepEqual(cleanSheet.validation.needsReviewRows, []);
   assert.deepEqual(cleanSheet.validation.duplicates, []);
+  assert.deepEqual(cleanSheet.validation.missingProofRows, []);
   assert.equal(cleanSheet.validation.needsReviewCount, 0);
   assert.equal(cleanSheet.validation.duplicateCount, 0);
+  assert.equal(cleanSheet.validation.missingProofCount, 0);
   assert.deepEqual(cleanSheet.summary, {
     billableTotals: [
       {
@@ -1051,9 +1057,11 @@ function verifyBuildSpreadsheetModule() {
         gross: 18,
       },
     ],
+    missingProofCount: 0,
     needsReviewCount: 0,
     ready: true,
     rowCount: 3,
+    sourceProofCount: 3,
     status: "ready",
     totalGross: 36.6,
     totalNet: 30.5,
@@ -1069,6 +1077,7 @@ function verifyBuildSpreadsheetModule() {
   };
   const reviewSheet = buildReceiptSheet([
     {
+      sourceUri: "file://mismatch-cafe.jpg",
       fields: {
         category: "Meals",
         date: "2026-07-03",
@@ -1101,6 +1110,7 @@ function verifyBuildSpreadsheetModule() {
 
   const duplicateSheet = buildReceiptSheet([
     {
+      sourceUri: "file://duplicate-cafe-1.jpg",
       fields: {
         category: "Meals",
         date: "2026-07-04",
@@ -1115,6 +1125,7 @@ function verifyBuildSpreadsheetModule() {
       },
     },
     {
+      sourceUri: "file://duplicate-cafe-2.jpg",
       fields: {
         category: "Meals",
         date: "2026-07-04",
@@ -1129,6 +1140,7 @@ function verifyBuildSpreadsheetModule() {
       },
     },
     {
+      sourceUri: "file://different-vendor.jpg",
       fields: {
         category: "Travel",
         date: "2026-07-04",
@@ -1172,6 +1184,50 @@ function verifyBuildSpreadsheetModule() {
   ]);
   assert.equal(duplicateSheet.summary.ready, false);
   assert.equal(duplicateSheet.summary.status, "needs_review");
+
+  const missingProofSheet = buildReceiptSheet([
+    {
+      fields: {
+        category: "Travel",
+        date: "2026-07-09",
+        gross: 30,
+        net: 25,
+        vat: 5,
+        vendor: "Missing Proof Taxi",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      sourceUri: "file://proved-train.jpg",
+      fields: {
+        category: "Travel",
+        date: "2026-07-10",
+        gross: 18,
+        net: 15,
+        vat: 3,
+        vendor: "Proved Train",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ]);
+
+  assert.deepEqual(missingProofSheet.validation.missingProofRows, [
+    { index: 0, rowNumber: 1 },
+  ]);
+  assert.equal(missingProofSheet.validation.missingProofCount, 1);
+  assert.equal(missingProofSheet.summary.sourceProofCount, 1);
+  assert.equal(missingProofSheet.summary.missingProofCount, 1);
+  assert.deepEqual(missingProofSheet.summary.blockers, [
+    "1 row missing source proof",
+  ]);
+  assert.equal(missingProofSheet.summary.ready, false);
+  assert.equal(missingProofSheet.summary.status, "needs_review");
 }
 
 async function verifyExportShareModule() {
@@ -1356,9 +1412,11 @@ async function verifyExportReviewedReceiptsHelper() {
     ],
     duplicateCount: 0,
     locationTotals: [],
+    missingProofCount: 0,
     needsReviewCount: 1,
     ready: false,
     rowCount: 2,
+    sourceProofCount: 2,
     status: "needs_review",
     totalGross: 37.5,
     totalNet: 30,

@@ -7,10 +7,20 @@ function getReceiptList(receipts) {
   return Array.isArray(receipts) ? receipts : [];
 }
 
+function countRowsWithProof(receipts) {
+  return receipts.filter((receipt) => {
+    return Boolean(receipt?.sourceUri || receipt?.imageUri || receipt?.uri);
+  }).length;
+}
+
 function buildReceiptSummary(receipts, sheet) {
+  const sourceProofCount = countRowsWithProof(receipts);
+
   return sheet.summary || {
+    missingProofCount: receipts.length - sourceProofCount,
     needsReviewCount: sheet.validation?.needsReviewCount || 0,
     rowCount: receipts.length,
+    sourceProofCount,
   };
 }
 
@@ -20,12 +30,6 @@ function formatMoney(value) {
 
 function pluralize(count, singular, plural = `${singular}s`) {
   return count === 1 ? singular : plural;
-}
-
-function countRowsWithProof(receipts) {
-  return receipts.filter((receipt) => {
-    return Boolean(receipt?.sourceUri || receipt?.imageUri || receipt?.uri);
-  }).length;
 }
 
 function formatBreakdown(rows, labelKey) {
@@ -44,7 +48,6 @@ function formatBreakdown(rows, labelKey) {
 function buildHandoffNote(receipts, sheet) {
   const receiptList = getReceiptList(receipts);
   const summary = buildReceiptSummary(receiptList, sheet);
-  const proofCount = countRowsWithProof(receiptList);
   const status = summary.ready ? "Ready" : "Needs review";
 
   return [
@@ -52,7 +55,7 @@ function buildHandoffNote(receipts, sheet) {
     "",
     `Status: ${status}`,
     `Rows: ${summary.rowCount}`,
-    `Rows with source proof: ${proofCount}/${summary.rowCount}`,
+    `Rows with source proof: ${summary.sourceProofCount}/${summary.rowCount}`,
     `Gross total: ${formatMoney(summary.totalGross)}`,
     `Net total: ${formatMoney(summary.totalNet)}`,
     `VAT total: ${formatMoney(summary.totalVat)}`,
