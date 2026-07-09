@@ -308,11 +308,13 @@ function verifyE2EFlow() {
     buildMcpToolInvocation({
       arguments: { receiptId: "receipt-1" },
       serverId: "mcp-receipts",
+      serverUrl: "https://mcp.example.test/mcp",
       toolName: "append_receipt",
     }),
     {
       arguments: { receiptId: "receipt-1" },
       serverId: "mcp-receipts",
+      serverUrl: "https://mcp.example.test/mcp",
       toolName: "append_receipt",
       transport: MCP_TRANSPORT.STREAMABLE_HTTP,
     },
@@ -386,6 +388,7 @@ function verifyBackendFunctionSources() {
   const triggerActionSource = read("supabase/functions/trigger-actions/index.ts");
   const scheduleSource = read("supabase/functions/schedule-jobs/index.ts");
   const locationSource = read("supabase/functions/location-suggestions/index.ts");
+  const mcpSource = read("supabase/functions/mcp-bridge/index.ts");
   const codeSource = read("supabase/functions/code-execution-bridge/index.ts");
   const runnerSource = read("supabase/functions/code-execution-runner/index.ts");
   const edgeHarnessSource = read("scripts/verify-edge-functions.js");
@@ -426,6 +429,17 @@ function verifyBackendFunctionSources() {
   assert.match(locationSource, /integration_events/);
   assert.match(locationSource, /trigger_runs/);
   assert.doesNotMatch(locationSource, /preciseLocation/);
+  assert.match(mcpSource, /auth\/v1\/user/);
+  assert.match(mcpSource, /user_mismatch/);
+  assert.match(mcpSource, /streamable_http/);
+  assert.match(mcpSource, /tools\/list/);
+  assert.match(mcpSource, /tools\/call/);
+  assert.match(mcpSource, /application\/json, text\/event-stream/);
+  assert.match(mcpSource, /blockedHostPattern/);
+  assert.match(mcpSource, /isSafeRemoteHttpUrl/);
+  assert.match(mcpSource, /remote_http_required/);
+  assert.match(mcpSource, /mcp_request_failed/);
+  assert.doesNotMatch(mcpSource, /MCP_API_KEY|service_role/i);
   assert.match(codeSource, /auth\/v1\/user/);
   assert.match(codeSource, /user_mismatch/);
   assert.match(codeSource, /DAYTONA_API_KEY/);
@@ -453,6 +467,7 @@ function verifyBackendFunctionSources() {
   assert.match(edgeHarnessSource, /verifyRunActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
+  assert.match(edgeHarnessSource, /verifyMcpBridgeFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionRunnerFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);

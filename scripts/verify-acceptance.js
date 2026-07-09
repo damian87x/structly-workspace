@@ -3252,17 +3252,27 @@ function verifyMcpBridgeBackendOnlySource() {
     buildMcpToolInvocation({
       arguments: { id: "receipt-1" },
       serverId: "server-1",
+      serverUrl: "https://mcp.example.com/mcp",
       toolName: "safe",
     }),
     {
       arguments: { id: "receipt-1" },
       serverId: "server-1",
+      serverUrl: "https://mcp.example.com/mcp",
       toolName: "safe",
       transport: MCP_TRANSPORT.STREAMABLE_HTTP,
     },
   );
   assert.match(functionSource, /streamable_http/);
+  assert.match(functionSource, /auth\/v1\/user/);
+  assert.match(functionSource, /user_mismatch/);
+  assert.match(functionSource, /tools\/list/);
+  assert.match(functionSource, /tools\/call/);
+  assert.match(functionSource, /application\/json, text\/event-stream/);
+  assert.match(functionSource, /blockedHostPattern/);
+  assert.match(functionSource, /isSafeRemoteHttpUrl/);
   assert.match(functionSource, /remote_http_required/);
+  assert.match(functionSource, /mcp_request_failed/);
   assert.match(functionSource, /missing_auth/);
   assert.doesNotMatch(functionSource, /stdio/);
   assert.doesNotMatch(appSource, /@modelcontextprotocol|stdio|MCP_API_KEY/);
@@ -3572,6 +3582,7 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyRunActionsFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
+  assert.match(edgeHarnessSource, /verifyMcpBridgeFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionRunnerFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);

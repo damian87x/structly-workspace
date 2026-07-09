@@ -38,10 +38,16 @@ function getMobileSafeToolCatalog(tools, allowedNames = []) {
     }));
 }
 
-function buildMcpToolInvocation({ arguments: args = {}, serverId, toolName }) {
+function buildMcpToolInvocation({
+  arguments: args = {},
+  serverId,
+  serverUrl,
+  toolName,
+}) {
   return {
     arguments: args,
     serverId,
+    serverUrl,
     toolName,
     transport: MCP_TRANSPORT.STREAMABLE_HTTP,
   };

@@ -40,6 +40,7 @@ function loadEdgeHandler(path, { env = DEFAULT_ENV, fetchImpl } = {}) {
     Request,
     Response,
     TextEncoder,
+    URL,
     btoa,
     serve(nextHandler) {
       handler = nextHandler;
@@ -562,6 +563,153 @@ async function verifyLocationSuggestionsFunction() {
   assert.equal("preciseLocation" in eventCall.body.payload, false);
 }
 
+async function verifyMcpBridgeFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/mcp-bridge/index.ts", {
+    fetchImpl: async (url, options = {}) => {
+      const requestUrl = String(url);
+
+      if (requestUrl.endsWith("/auth/v1/user")) {
+        return options.headers?.Authorization === "Bearer user-token"
+          ? jsonResponse({ id: "user-1" })
+          : jsonResponse({ error: "invalid" }, 401);
+      }
+
+      calls.push({
+        body: parseBody(options),
+        headers: options.headers || {},
+        method: options.method || "GET",
+        url: requestUrl,
+      });
+
+      return jsonResponse({
+        id: calls[calls.length - 1].body.id,
+        jsonrpc: "2.0",
+        result: { content: [{ text: "ok", type: "text" }] },
+      });
+    },
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          serverUrl: "https://mcp.example.test/mcp",
+          transport: "streamable_http",
+        },
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const mismatch = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          serverUrl: "https://mcp.example.test/mcp",
+          transport: "streamable_http",
+          userId: "user-2",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(mismatch.status, 403);
+  assert.equal(mismatch.data.error, "user_mismatch");
+  assert.equal(calls.length, 0);
+
+  const invalidTransport = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          serverUrl: "file:///tmp/mcp.sock",
+          transport: "stdio",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(invalidTransport.status, 400);
+  assert.equal(invalidTransport.data.error, "remote_http_required");
+  assert.equal(calls.length, 0);
+
+  const localTarget = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          serverUrl: "http://127.0.0.1:8787/mcp",
+          transport: "streamable_http",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(localTarget.status, 400);
+  assert.equal(localTarget.data.error, "remote_http_required");
+  assert.equal(calls.length, 0);
+
+  const listed = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          requestId: "mcp-list-1",
+          serverUrl: "https://mcp.example.test/mcp",
+          transport: "streamable_http",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const listCall = calls.find((call) => call.body.method === "tools/list");
+
+  assert.equal(listed.status, 200);
+  assert.equal(listed.data.action, "list_tools");
+  assert.ok(listCall);
+  assert.equal(listCall.method, "POST");
+  assert.equal(listCall.headers.Accept, "application/json, text/event-stream");
+  assert.equal(listCall.body.id, "mcp-list-1");
+  assert.equal(listCall.body.jsonrpc, "2.0");
+  assert.deepEqual(listCall.body.params, {});
+
+  const called = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          arguments: { receiptId: "receipt-1" },
+          requestId: "mcp-call-1",
+          serverUrl: "https://mcp.example.test/mcp",
+          toolName: "append_receipt",
+          transport: "streamable_http",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const toolCall = calls.find((call) => call.body.method === "tools/call");
+
+  assert.equal(called.status, 200);
+  assert.equal(called.data.action, "call_tool");
+  assert.ok(toolCall);
+  assert.equal(toolCall.body.id, "mcp-call-1");
+  assert.equal(toolCall.body.params.name, "append_receipt");
+  assert.deepEqual(toolCall.body.params.arguments, { receiptId: "receipt-1" });
+}
+
 async function verifyCodeExecutionFunction() {
   const calls = [];
   const handler = loadEdgeHandler(
@@ -845,6 +993,7 @@ async function main() {
   await verifyRunActionsFunction();
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
+  await verifyMcpBridgeFunction();
   await verifyCodeExecutionFunction();
   await verifyCodeExecutionRunnerFunction();
   await verifyStatusReadFunction();
