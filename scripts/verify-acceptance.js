@@ -3641,6 +3641,9 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_SERVER_ID/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON/);
+  assert.match(liveSmokeSource, /requireAllIntegrations/);
+  assert.match(liveSmokeSource, /--require-all-integrations/);
+  assert.match(liveSmokeSource, /FULL_INTEGRATION_ENV/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
   assert.match(liveSmokeSource, /verifyDeviceHeartbeat/);
   assert.match(liveSmokeSource, /verifyWorkerHeartbeat/);
@@ -3673,6 +3676,8 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(liveSmokeDocs, /--require-all-integrations/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_MCP_TOOL_NAME/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
   assert.match(liveSmokeDocs, /allowedTools/);
   assert.match(pixelSmokeDocs, /npm run test:pixel/);

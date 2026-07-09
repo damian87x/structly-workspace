@@ -15,6 +15,12 @@ To fail when required env is missing:
 npm run test:live -- --require-live
 ```
 
+To fail unless every integration path below is configured and exercised:
+
+```sh
+npm run test:live -- --require-all-integrations
+```
+
 ## Optional Paths
 
 Location suggestion:
@@ -76,6 +82,8 @@ STRUCTLY_TEST_MCP_SERVER_ID="enabled-mcp-source-id-or-source-key"
 STRUCTLY_TEST_MCP_TOOL_NAME="optional-approved-tool-name"
 STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON='{"receiptId":"receipt-id"}'
 ```
+
+`--require-all-integrations` requires `STRUCTLY_TEST_MCP_TOOL_NAME` so the smoke calls one approved MCP tool. `STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON` can be omitted when the approved tool accepts an empty argument object.
 
 The MCP smoke expects an enabled `integration_sources` row for the test user with `source_type = 'mcp'`. Its `capabilities` JSON must include a public `serverUrl` and, for tool calls, an `allowedTools` array containing the tool name:
 

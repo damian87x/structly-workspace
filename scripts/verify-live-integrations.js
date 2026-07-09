@@ -24,9 +24,23 @@ const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET",
 ];
 const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
+const MCP_TOOL_CALL_ENV = ["STRUCTLY_TEST_MCP_TOOL_NAME"];
 const TRIGGER_ACTIONS_ENV = ["STRUCTLY_TEST_TRIGGER_ACTIONS"];
 const TRIGGER_DISPATCH_ENV = ["STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID"];
 const WORKER_HEARTBEAT_ENV = ["STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"];
+const FULL_INTEGRATION_ENV = [
+  ...REQUIRED_ENV,
+  ...LOCATION_ENV,
+  ...TRIGGER_DISPATCH_ENV,
+  ...TRIGGER_ACTIONS_ENV,
+  ...CODE_ENV,
+  ...DAYTONA_ENV,
+  ...COMPOSIO_ENV,
+  ...SCHEDULE_ENV,
+  ...MCP_ENV,
+  ...MCP_TOOL_CALL_ENV,
+  ...WORKER_HEARTBEAT_ENV,
+];
 
 function getEnv(name) {
   const value = process.env[name];
@@ -35,7 +49,7 @@ function getEnv(name) {
 }
 
 function missingEnv(names) {
-  return names.filter((name) => !getEnv(name));
+  return [...new Set(names)].filter((name) => !getEnv(name));
 }
 
 function getConfig() {
@@ -53,6 +67,7 @@ function getConfig() {
     mcpServerId: getEnv("STRUCTLY_TEST_MCP_SERVER_ID"),
     mcpToolArgumentsJson: getEnv("STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON"),
     mcpToolName: getEnv("STRUCTLY_TEST_MCP_TOOL_NAME"),
+    requireAllIntegrations: process.argv.includes("--require-all-integrations"),
     requireLive: process.argv.includes("--require-live"),
     scheduleToken: getEnv("STRUCTLY_TEST_SCHEDULE_TOKEN"),
     scheduleTriggerId: getEnv("STRUCTLY_TEST_SCHEDULE_TRIGGER_ID"),
@@ -499,6 +514,15 @@ async function verifyMcpBridge(config) {
 async function main() {
   const config = getConfig();
   const missingRequired = missingEnv(REQUIRED_ENV);
+  const missingFullIntegration = config.requireAllIntegrations
+    ? missingEnv(FULL_INTEGRATION_ENV)
+    : [];
+
+  if (missingFullIntegration.length > 0) {
+    throw new Error(
+      `Full live integration checks failed; missing ${missingFullIntegration.join(", ")}.`,
+    );
+  }
 
   if (missingRequired.length > 0) {
     const message = `Live integration checks skipped; missing ${missingRequired.join(", ")}.`;
