@@ -3590,6 +3590,10 @@ function verifyE2EHarnessSource() {
     "scripts/verify-live-integrations.js",
     "utf8",
   );
+  const localLiveSmokeSource = fs.readFileSync(
+    "scripts/verify-local-live-integrations.js",
+    "utf8",
+  );
   const pixelSmokeSource = fs.readFileSync(
     "scripts/verify-pixel-device.js",
     "utf8",
@@ -3605,6 +3609,10 @@ function verifyE2EHarnessSource() {
     "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js && node scripts/verify-pixel-device.js --self-test",
   );
   assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");
+  assert.equal(
+    pkg.scripts["test:live:local"],
+    "node scripts/verify-local-live-integrations.js",
+  );
   assert.equal(pkg.scripts["test:pixel"], "node scripts/verify-pixel-device.js");
   assert.equal(
     pkg.scripts["test:all"],
@@ -3629,6 +3637,11 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyCodeExecutionRunnerFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
   assert.match(liveSmokeSource, /STRUCTLY_FUNCTIONS_URL/);
+  assert.match(localLiveSmokeSource, /supabase[\s\S]*functions[\s\S]*serve/);
+  assert.match(localLiveSmokeSource, /supabase[\s\S]*migration[\s\S]*up/);
+  assert.match(localLiveSmokeSource, /verify-live-integrations\.js/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
   assert.match(liveSmokeSource, /verifyStatusRead/);
   assert.match(liveSmokeSource, /verifyLocationSuggestion/);
   assert.match(liveSmokeSource, /verifyTriggerDispatch/);
@@ -3672,6 +3685,8 @@ function verifyE2EHarnessSource() {
   assert.match(ciDocs, /actions\/setup-node@v6/);
   assert.match(ciDocs, /workflow` scope/);
   assert.match(liveSmokeDocs, /npm run test:live/);
+  assert.match(liveSmokeDocs, /npm run test:live:local/);
+  assert.match(liveSmokeDocs, /supabase start/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_TRIGGER_ACTIONS/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_TRIGGER_DISPATCH_TRIGGER_ID/);
