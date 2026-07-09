@@ -6,6 +6,22 @@ const {
   createWorkerHeartbeat,
 } = require("./heartbeats");
 const {
+  createCodeExecutionRequest,
+  createCodeExecutionTriggerPayload,
+  validateCodeExecutionRequest,
+} = require("./codeExecutionBridge");
+const {
+  createLocationEvent,
+  createLocationSuggestion,
+  createLocationTriggerPayload,
+} = require("./locationEvents");
+const {
+  createScheduleJob,
+  createScheduleTriggerPayload,
+  isScheduleJobDue,
+  markScheduleJobRun,
+} = require("./scheduleJobs");
+const {
   TRIGGER_RUN_STATUS,
   createTriggerDefinition,
   createTriggerRun,
@@ -36,10 +52,13 @@ function requireAuth({ service = false, token } = {}) {
 function createMemoryStore(seed = {}) {
   return {
     auditLogs: [...(seed.auditLogs || [])],
+    codeExecutionRequests: [...(seed.codeExecutionRequests || [])],
     deadLetters: [...(seed.deadLetters || [])],
     deviceHeartbeats: [...(seed.deviceHeartbeats || [])],
     integrationEvents: [...(seed.integrationEvents || [])],
     integrationSources: [...(seed.integrationSources || [])],
+    locationEvents: [...(seed.locationEvents || [])],
+    scheduleJobs: [...(seed.scheduleJobs || [])],
     triggerRuns: [...(seed.triggerRuns || [])],
     triggers: [...(seed.triggers || [])],
     workerHeartbeats: [...(seed.workerHeartbeats || [])],
@@ -64,6 +83,17 @@ function upsertByKey(rows, key, nextRow) {
   };
 
   return { created: false, row: rows[index] };
+}
+
+function isProviderTrigger(trigger) {
+  const source = typeof trigger?.source === "string" ? trigger.source : "";
+
+  return !(
+    source === "schedule" ||
+    source.startsWith("schedule:") ||
+    source.startsWith("location:") ||
+    source.startsWith("code:")
+  );
 }
 
 function handleHeartbeatIngest({ body = {}, now = Date.now(), store, token }) {
@@ -199,6 +229,156 @@ function handleTriggerDispatch({ body = {}, now = Date.now(), store, token }) {
   });
 }
 
+function handleScheduleJobTick({ body = {}, now = Date.now(), store, token }) {
+  const authError = requireAuth({ service: body.service === true, token });
+
+  if (authError) {
+    return authError;
+  }
+
+  if (!body.userId || !body.triggerId || !body.scheduleKey) {
+    return fail("missing_schedule_scope", 400);
+  }
+
+  const seededJob =
+    findByKey(store.scheduleJobs, "scheduleKey", body.scheduleKey) || {};
+  const job = createScheduleJob({
+    ...seededJob,
+    cronExpression: body.cronExpression || seededJob.cronExpression,
+    id: body.jobId || seededJob.id,
+    intervalMinutes: body.intervalMinutes || seededJob.intervalMinutes,
+    metadata: body.metadata || seededJob.metadata || {},
+    nextRunAt: body.nextRunAt || seededJob.nextRunAt || now,
+    scheduleKey: body.scheduleKey,
+    status: body.status || seededJob.status,
+    triggerId: body.triggerId,
+    userId: body.userId,
+  });
+
+  if (!isScheduleJobDue({ job, now })) {
+    upsertByKey(store.scheduleJobs, "scheduleKey", job);
+    return ok({ due: false, job, queued: false });
+  }
+
+  const ranJob = markScheduleJobRun(job, now);
+  upsertByKey(store.scheduleJobs, "scheduleKey", ranJob);
+
+  const dispatch = handleTriggerDispatch({
+    body: createScheduleTriggerPayload({ job: ranJob, now }),
+    now,
+    store,
+    token: token || "schedule-worker",
+  });
+
+  return ok({
+    dispatch: dispatch.data,
+    due: true,
+    job: ranJob,
+    queued: dispatch.status === 200,
+  }, dispatch.status);
+}
+
+function handleLocationSuggestion({ body = {}, now = Date.now(), store, token }) {
+  const authError = requireAuth({ token });
+
+  if (authError) {
+    return authError;
+  }
+
+  if (!body.userId || !body.triggerId || !body.deviceId) {
+    return fail("missing_location_scope", 400);
+  }
+
+  const event = createLocationEvent({
+    coords: body.coords,
+    deviceId: body.deviceId,
+    eventType: body.eventType,
+    observedAt: body.observedAt || now,
+    placeId: body.placeId,
+    placeLabel: body.placeLabel,
+    userId: body.userId,
+  });
+
+  if (!event.payload.coarseLocation) {
+    return fail("missing_location", 400);
+  }
+
+  const suggestion = createLocationSuggestion({
+    event,
+    receiptCount: body.receiptCount || 0,
+  });
+  store.locationEvents.push({
+    ...event,
+    suggestion,
+  });
+
+  const dispatch = handleTriggerDispatch({
+    body: createLocationTriggerPayload({
+      event,
+      suggestion,
+      triggerId: body.triggerId,
+    }),
+    now,
+    store,
+    token,
+  });
+
+  return ok({
+    dispatch: dispatch.data,
+    queued: dispatch.status === 200,
+    suggestion,
+  }, dispatch.status);
+}
+
+function handleCodeExecutionRequest({ body = {}, now = Date.now(), store, token }) {
+  const authError = requireAuth({ token });
+
+  if (authError) {
+    return authError;
+  }
+
+  const request = createCodeExecutionRequest({
+    code: body.code,
+    command: body.command,
+    environment: body.environment,
+    id: body.id,
+    language: body.language,
+    now,
+    provider: body.provider,
+    purpose: body.purpose,
+    timeoutSeconds: body.timeoutSeconds,
+    triggerRunId: body.triggerRunId,
+    userId: body.userId,
+    workingDirectory: body.workingDirectory,
+  });
+  const validation = validateCodeExecutionRequest(request);
+
+  if (!validation.ok) {
+    return fail(validation.reason, 400);
+  }
+
+  const result = upsertByKey(store.codeExecutionRequests, "id", request);
+  let dispatch = null;
+
+  if (body.triggerId) {
+    dispatch = handleTriggerDispatch({
+      body: createCodeExecutionTriggerPayload({
+        request,
+        triggerId: body.triggerId,
+      }),
+      now,
+      store,
+      token,
+    });
+  }
+
+  return ok({
+    queued: true,
+    request: result.row,
+    run: dispatch?.data?.run || null,
+  }, dispatch?.status || 202);
+}
+
 function handleComposioWebhook({
   body = {},
   headers,
@@ -250,15 +430,22 @@ function handleStatusRead({ now = Date.now(), store, token, userId }) {
     backend: "available",
     bridge:
       store.integrationSources?.some((source) => source.enabled) ||
-      store.triggers.some((trigger) => trigger.status === "active") ||
+      store.triggers.some(
+        (trigger) => trigger.status === "active" && isProviderTrigger(trigger),
+      ) ||
       store.integrationEvents.some((event) => String(event.source).startsWith("mcp"))
         ? "available"
         : "unavailable",
-    cron: "unknown",
+    codeExecution:
+      store.codeExecutionRequests.length > 0 ? "available" : "unknown",
+    cron: store.scheduleJobs.length > 0 ? "available" : "unknown",
     deviceHeartbeat: classifyHeartbeat({
       lastSeenAt: latestDevice?.seenAt,
       now,
     }),
+    locationSuggestionCount: store.locationEvents.filter(
+      (event) => !userId || event.userId === userId,
+    ).length,
     realtime: "unknown",
     runCount: store.triggerRuns.filter((run) => !userId || run.userId === userId)
       .length,
@@ -277,8 +464,15 @@ function handleMobileSync({ store, token, userId }) {
   }
 
   return ok({
+    codeExecutionRequests: store.codeExecutionRequests.filter(
+      (request) => !userId || request.userId === userId,
+    ),
     connectors: [],
+    locationSuggestions: store.locationEvents.filter(
+      (event) => !userId || event.userId === userId,
+    ),
     runHistory: store.triggerRuns.filter((run) => !userId || run.userId === userId),
+    scheduleJobs: store.scheduleJobs.filter((job) => !userId || job.userId === userId),
     triggerDefinitions: store.triggers.filter(
       (trigger) => !userId || trigger.userId === userId,
     ),
@@ -287,9 +481,12 @@ function handleMobileSync({ store, token, userId }) {
 
 module.exports = {
   createMemoryStore,
+  handleCodeExecutionRequest,
   handleComposioWebhook,
   handleHeartbeatIngest,
+  handleLocationSuggestion,
   handleMobileSync,
+  handleScheduleJobTick,
   handleStatusRead,
   handleTriggerDispatch,
 };

@@ -112,10 +112,33 @@ const {
   summarizeRunForUser,
 } = require("../src/lib/integrationObservability");
 const {
+  CODE_EXECUTION_PROVIDER,
+  createCodeExecutionRequest,
+  sanitizeEnvironment,
+  validateCodeExecutionRequest,
+} = require("../src/lib/codeExecutionBridge");
+const {
+  LOCATION_EVENT_TYPE,
+  createCoarseLocation,
+  createLocationEvent,
+  createLocationSuggestion,
+  createLocationTriggerPayload,
+} = require("../src/lib/locationEvents");
+const {
+  SCHEDULE_JOB_STATUS,
+  createScheduleJob,
+  createScheduleTriggerPayload,
+  isScheduleJobDue,
+  markScheduleJobRun,
+} = require("../src/lib/scheduleJobs");
+const {
   createMemoryStore,
+  handleCodeExecutionRequest,
   handleComposioWebhook,
   handleHeartbeatIngest,
+  handleLocationSuggestion,
   handleMobileSync,
+  handleScheduleJobTick,
   handleStatusRead,
   handleTriggerDispatch,
 } = require("../src/lib/integrationHandlers");
@@ -2310,6 +2333,7 @@ async function verifyEnrichReceiptModule() {
 
 function verifyIntegrationRoadmap() {
   const roadmap = fs.readFileSync("docs/integration-roadmap.md", "utf8");
+  const pixelPlan = fs.readFileSync("docs/android-pixel-test-plan.md", "utf8");
 
   assert.match(roadmap, /current MVP remains/);
   assert.match(
@@ -2318,7 +2342,13 @@ function verifyIntegrationRoadmap() {
   );
   assert.match(roadmap, /Default runtime is Supabase-only/);
   assert.match(roadmap, /Composio and MCP are backend adapters/);
+  assert.match(roadmap, /Schedules, Location Suggestions, And Code Runs/);
+  assert.match(roadmap, /Daytona-style code execution/);
+  assert.match(roadmap, /npm run test:e2e/);
   assert.match(roadmap, /Mobile bundle\/env audit/);
+  assert.match(pixelPlan, /Pixel device/);
+  assert.match(pixelPlan, /Killed-app behavior is recorded instead of assumed/);
+  assert.match(pixelPlan, /coarse coordinates/);
 }
 
 async function verifyIntegrationBackendClientModule() {
@@ -2385,8 +2415,10 @@ function verifyIntegrationCapabilityHealthModule() {
     background: { configured: true, supported: true },
     backend: { reachable: true },
     calendarPermission: { granted: true },
+    codeExecutionConfigured: true,
     locationPermission: { status: "granted" },
     providerConfigured: true,
+    schedulerConfigured: true,
   });
   const denied = getDefaultIntegrationHealth({
     backend: { reachable: false },
@@ -2400,11 +2432,15 @@ function verifyIntegrationCapabilityHealthModule() {
   assert.equal(granted.background, CAPABILITY_STATUS.CONSTRAINED);
   assert.equal(granted.backend, CAPABILITY_STATUS.AVAILABLE);
   assert.equal(granted.triggers, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(granted.scheduler, CAPABILITY_STATUS.AVAILABLE);
+  assert.equal(granted.codeExecution, CAPABILITY_STATUS.CONSTRAINED);
   assert.equal(isIntegrationReady(granted), true);
   assert.equal(denied.location, CAPABILITY_STATUS.DENIED);
   assert.equal(denied.calendar, CAPABILITY_STATUS.DENIED);
   assert.equal(denied.backend, CAPABILITY_STATUS.OFFLINE);
   assert.equal(denied.triggers, CAPABILITY_STATUS.OFFLINE);
+  assert.equal(denied.scheduler, CAPABILITY_STATUS.OFFLINE);
+  assert.equal(denied.codeExecution, CAPABILITY_STATUS.OFFLINE);
   assert.equal(isIntegrationReady(denied), false);
   assert.equal(
     getBackendCapability({ stale: true }),
@@ -2418,7 +2454,15 @@ function verifyIntegrationCapabilityHealthModule() {
   assert.doesNotMatch(BACKGROUND_EXECUTION_NOTE, /guaranteed/i);
   assert.deepEqual(
     getHealthRows(granted).map((row) => row.label),
-    ["Location", "Calendar", "Backend", "Triggers", "Background"],
+    [
+      "Location",
+      "Calendar",
+      "Backend",
+      "Triggers",
+      "Schedule Jobs",
+      "Code Runs",
+      "Background",
+    ],
   );
 }
 
@@ -2479,6 +2523,12 @@ function verifyTriggerLifecycleModule() {
     id: "run-1",
     trigger,
   });
+  const codeRun = createTriggerRun({
+    action: "execute_code",
+    event,
+    id: "run-code",
+    trigger,
+  });
 
   assert.equal(trigger.status, TRIGGER_STATUS.ACTIVE);
   assert.equal(getEventDedupeKey(event), "database:event-1");
@@ -2493,6 +2543,7 @@ function verifyTriggerLifecycleModule() {
     reason: "duplicate",
   });
   assert.equal(run.status, TRIGGER_RUN_STATUS.APPROVAL_REQUIRED);
+  assert.equal(codeRun.status, TRIGGER_RUN_STATUS.APPROVAL_REQUIRED);
   assert.equal(approveTriggerRun(run, false).status, TRIGGER_RUN_STATUS.DENIED);
   assert.equal(approveTriggerRun(run, false).details.externalActionReady, false);
   assert.equal(approveTriggerRun(run, true).details.externalActionReady, true);
@@ -2510,6 +2561,101 @@ function verifyTriggerLifecycleModule() {
       token: "token",
     }),
     { name: "Safe" },
+  );
+}
+
+function verifyScheduleLocationAndCodeModules() {
+  const now = Date.UTC(2026, 6, 9, 12, 0, 0);
+  const job = createScheduleJob({
+    intervalMinutes: 60,
+    nextRunAt: now - 1000,
+    scheduleKey: "hourly-review",
+    triggerId: "trigger-schedule",
+    userId: "user-1",
+  });
+  const ranJob = markScheduleJobRun(job, now);
+  const schedulePayload = createScheduleTriggerPayload({
+    job,
+    now,
+  });
+
+  assert.equal(job.status, SCHEDULE_JOB_STATUS.ACTIVE);
+  assert.equal(job.scheduleKey, "hourly-review");
+  assert.equal(isScheduleJobDue({ job, now }), true);
+  assert.equal(ranJob.lastRunAt, new Date(now).toISOString());
+  assert.equal(schedulePayload.source, "schedule:hourly-review");
+  assert.equal(schedulePayload.eventType, "schedule_tick");
+
+  const coarseLocation = createCoarseLocation({
+    latitude: 51.507351,
+    longitude: -0.127758,
+  });
+  const event = createLocationEvent({
+    coords: {
+      latitude: 51.507351,
+      longitude: -0.127758,
+    },
+    deviceId: "pixel-1",
+    eventType: LOCATION_EVENT_TYPE.VISIT,
+    observedAt: now,
+    placeId: "soho-market",
+    placeLabel: "Soho Market",
+    userId: "user-1",
+  });
+  const suggestion = createLocationSuggestion({
+    event,
+    receiptCount: 2,
+  });
+  const locationPayload = createLocationTriggerPayload({
+    event,
+    suggestion,
+    triggerId: "trigger-location",
+  });
+
+  assert.deepEqual(coarseLocation, {
+    accuracy: "coarse",
+    latitude: 51.51,
+    longitude: -0.13,
+  });
+  assert.equal(event.source, "location:coarse");
+  assert.equal(suggestion.confidence, "medium");
+  assert.equal(locationPayload.payload.suggestion.suggestedAction, "review_receipt_context");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(locationPayload.payload, "preciseLocation"),
+    false,
+  );
+
+  const codeRequest = createCodeExecutionRequest({
+    code: "console.log('ok')",
+    environment: {
+      API_TOKEN: "secret",
+      NODE_ENV: "test",
+    },
+    language: "typescript",
+    now,
+    provider: CODE_EXECUTION_PROVIDER.DAYTONA,
+    userId: "user-1",
+  });
+
+  assert.deepEqual(sanitizeEnvironment({
+    password: "secret",
+    safe: "ok",
+    service_role: "secret",
+  }), { safe: "ok" });
+  assert.equal(codeRequest.provider, CODE_EXECUTION_PROVIDER.DAYTONA);
+  assert.equal(codeRequest.mobileExecution, false);
+  assert.equal(codeRequest.approvalRequired, true);
+  assert.deepEqual(codeRequest.environment, { NODE_ENV: "test" });
+  assert.deepEqual(validateCodeExecutionRequest(codeRequest), {
+    ok: true,
+    reason: null,
+  });
+  assert.equal(
+    validateCodeExecutionRequest({
+      ...codeRequest,
+      language: null,
+    }).reason,
+    "unsupported_language",
   );
 }
 
@@ -2614,6 +2760,27 @@ function verifyIntegrationHandlersBehavior() {
         type: "receipt_reviewed",
         userId: "user-1",
       }),
+      createTriggerDefinition({
+        id: "trigger-schedule",
+        name: "Scheduled review",
+        source: "schedule",
+        type: "schedule_tick",
+        userId: "user-1",
+      }),
+      createTriggerDefinition({
+        id: "trigger-location",
+        name: "Location suggestion",
+        source: "location:coarse",
+        type: "location_visit",
+        userId: "user-1",
+      }),
+      createTriggerDefinition({
+        id: "trigger-code",
+        name: "Code execution",
+        source: "code:daytona",
+        type: "code_execution_requested",
+        userId: "user-1",
+      }),
     ],
   });
 
@@ -2703,6 +2870,61 @@ function verifyIntegrationHandlersBehavior() {
   assert.equal(store.integrationEvents.length, 1);
   assert.equal(store.triggerRuns.length, 2);
 
+  const scheduleTick = handleScheduleJobTick({
+    body: {
+      intervalMinutes: 1440,
+      nextRunAt: now - 1000,
+      scheduleKey: "daily-review",
+      service: true,
+      triggerId: "trigger-schedule",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "service-role",
+  });
+  const locationSuggestion = handleLocationSuggestion({
+    body: {
+      coords: {
+        latitude: 51.507351,
+        longitude: -0.127758,
+      },
+      deviceId: "pixel-1",
+      observedAt: now,
+      placeId: "soho-market",
+      receiptCount: 1,
+      triggerId: "trigger-location",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "user-token",
+  });
+  const codeRequest = handleCodeExecutionRequest({
+    body: {
+      code: "console.log('ok')",
+      environment: {
+        API_TOKEN: "secret",
+        NODE_ENV: "test",
+      },
+      id: "code-request-1",
+      language: "typescript",
+      triggerId: "trigger-code",
+      userId: "user-1",
+    },
+    now,
+    store,
+    token: "user-token",
+  });
+
+  assert.equal(scheduleTick.data.queued, true);
+  assert.equal(store.scheduleJobs.length, 1);
+  assert.equal(locationSuggestion.data.suggestion.confidence, "medium");
+  assert.equal(store.locationEvents.length, 1);
+  assert.equal(codeRequest.data.request.mobileExecution, false);
+  assert.equal(codeRequest.data.request.environment.API_TOKEN, undefined);
+  assert.equal(codeRequest.data.run.status, TRIGGER_RUN_STATUS.APPROVAL_REQUIRED);
+
   const staleWebhook = handleComposioWebhook({
     body: { id: "evt-stale", toolkit: "gmail" },
     headers: {
@@ -2780,10 +3002,62 @@ function verifyIntegrationHandlersBehavior() {
 
   assert.equal(status.data.backend, "available");
   assert.equal(status.data.bridge, "available");
-  assert.equal(status.data.runCount, 3);
+  assert.equal(status.data.cron, "available");
+  assert.equal(status.data.codeExecution, "available");
+  assert.equal(status.data.locationSuggestionCount, 1);
+  assert.equal(status.data.runCount, 6);
   assert.equal(status.data.workerHeartbeat, HEARTBEAT_STATUS.FRESH);
-  assert.equal(sync.data.triggerDefinitions.length, 2);
-  assert.equal(sync.data.runHistory.length, 3);
+  assert.equal(sync.data.triggerDefinitions.length, 5);
+  assert.equal(sync.data.scheduleJobs.length, 1);
+  assert.equal(sync.data.locationSuggestions.length, 1);
+  assert.equal(sync.data.codeExecutionRequests.length, 1);
+  assert.equal(sync.data.runHistory.length, 6);
+
+  const automationOnlyStatus = handleStatusRead({
+    now,
+    store: createMemoryStore({
+      codeExecutionRequests: [
+        createCodeExecutionRequest({
+          code: "console.log('queued')",
+          id: "code-only",
+          language: "typescript",
+          now,
+          userId: "user-1",
+        }),
+      ],
+      scheduleJobs: [
+        createScheduleJob({
+          intervalMinutes: 1440,
+          nextRunAt: now,
+          scheduleKey: "automation-only",
+          triggerId: "trigger-schedule",
+          userId: "user-1",
+        }),
+      ],
+      triggers: [
+        createTriggerDefinition({
+          id: "trigger-schedule",
+          name: "Schedule only",
+          source: "schedule",
+          type: "schedule_tick",
+          userId: "user-1",
+        }),
+        createTriggerDefinition({
+          id: "trigger-code",
+          name: "Code only",
+          source: "code:daytona",
+          type: "code_execution_requested",
+          userId: "user-1",
+        }),
+      ],
+    }),
+    token: "user-token",
+    userId: "user-1",
+  });
+
+  assert.equal(automationOnlyStatus.data.bridge, "unavailable");
+  assert.equal(automationOnlyStatus.data.cron, "available");
+  assert.equal(automationOnlyStatus.data.codeExecution, "available");
 }
 
 function verifyMcpBridgeBackendOnlySource() {
@@ -2895,6 +3169,9 @@ function verifySupabaseIntegrationSources() {
     "status-read",
     "composio-webhook",
     "mcp-bridge",
+    "schedule-jobs",
+    "location-suggestions",
+    "code-execution-bridge",
   ];
 
   assert.ok(migrationFiles.length > 0);
@@ -2906,6 +3183,9 @@ function verifySupabaseIntegrationSources() {
     "worker_heartbeats",
     "integration_audit_logs",
     "dead_letter_events",
+    "schedule_jobs",
+    "location_event_suggestions",
+    "code_execution_requests",
   ]) {
     assert.match(
       migration,
@@ -2947,10 +3227,36 @@ function verifySupabaseIntegrationSources() {
   assert.match(statusReadSource, /integration_sources/);
   assert.match(statusReadSource, /trigger_definitions/);
   assert.match(statusReadSource, /bridge,/);
+  assert.match(statusReadSource, /codeExecution/);
+  assert.match(statusReadSource, /cron/);
+  assert.match(statusReadSource, /locationSuggestionCount/);
+  assert.match(statusReadSource, /auth\/v1\/user/);
+  assert.match(statusReadSource, /user_id=eq\.\$\{userFilter\}/);
+  assert.match(statusReadSource, /isProviderTrigger/);
+  assert.match(
+    fs.readFileSync("supabase/functions/schedule-jobs/index.ts", "utf8"),
+    /SCHEDULE_JOBS_TOKEN[\s\S]*trigger_runs/,
+  );
+  assert.doesNotMatch(
+    fs.readFileSync("supabase/functions/schedule-jobs/index.ts", "utf8"),
+    /startsWith\("bearer "\)/,
+  );
+  assert.match(
+    fs.readFileSync("supabase/functions/location-suggestions/index.ts", "utf8"),
+    /auth\/v1\/user[\s\S]*user_mismatch[\s\S]*location_event_suggestions[\s\S]*integration_events[\s\S]*trigger_runs/,
+  );
+  assert.match(
+    fs.readFileSync("supabase/functions/code-execution-bridge/index.ts", "utf8"),
+    /auth\/v1\/user[\s\S]*user_mismatch[\s\S]*DAYTONA_API_KEY[\s\S]*code_execution_requests[\s\S]*integration_events[\s\S]*trigger_runs/,
+  );
 }
 
 function verifyIntegrationUiSource() {
   const appSource = fs.readFileSync("App.js", "utf8");
+  const capabilitySource = fs.readFileSync(
+    "src/lib/integrationCapabilities.js",
+    "utf8",
+  );
   const dashboardSource = fs.readFileSync(
     "src/lib/integrationDashboard.js",
     "utf8",
@@ -2964,6 +3270,8 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /getDefaultTriggerDashboard/);
   assert.match(appSource, /getHealthRows/);
   assert.match(appSource, /Connector status/);
+  assert.match(capabilitySource, /Schedule Jobs/);
+  assert.match(capabilitySource, /Code Runs/);
   assert.match(appSource, /Trigger list/);
   assert.match(appSource, /Catalog source: backend/);
   assert.match(appSource, /Create trigger/);
@@ -2980,8 +3288,37 @@ function verifyIntegrationUiSource() {
   assert.match(dashboardSource, /DEAD_LETTERED/);
   assert.doesNotMatch(
     appSource,
-    /OpenClaw|Hermes|gateway token|worker implementation/i,
+    /OpenClaw|Hermes|gateway token|worker implementation|DAYTONA|COMPOSIO|SERVICE_ROLE/i,
   );
+}
+
+function verifyE2EHarnessSource() {
+  const e2eSource = fs.readFileSync("scripts/verify-e2e.js", "utf8");
+  const edgeHarnessSource = fs.readFileSync(
+    "scripts/verify-edge-functions.js",
+    "utf8",
+  );
+  const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+
+  assert.equal(
+    pkg.scripts["test:e2e"],
+    "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
+  );
+  assert.equal(
+    pkg.scripts["test:all"],
+    "npm test && npm run audit:oauth && npm run test:e2e",
+  );
+  assert.match(e2eSource, /handleScheduleJobTick/);
+  assert.match(e2eSource, /handleLocationSuggestion/);
+  assert.match(e2eSource, /handleCodeExecutionRequest/);
+  assert.match(e2eSource, /handleComposioWebhook/);
+  assert.match(e2eSource, /assertMobileSafeMcpServer/);
+  assert.match(e2eSource, /Pixel/);
+  assert.match(edgeHarnessSource, /vm\.runInNewContext/);
+  assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
+  assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
+  assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
+  assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
 }
 
 async function main() {
@@ -3008,6 +3345,7 @@ async function main() {
   verifyIntegrationCapabilityHealthModule();
   verifyHeartbeatClassificationModule();
   verifyTriggerLifecycleModule();
+  verifyScheduleLocationAndCodeModules();
   verifyIntegrationDashboardModule();
   verifyIntegrationHandlersBehavior();
   verifyComposioWebhookBackendOnlySource();
@@ -3015,6 +3353,7 @@ async function main() {
   verifyObservabilityAndRedactionSource();
   verifySupabaseIntegrationSources();
   verifyIntegrationUiSource();
+  verifyE2EHarnessSource();
   console.log("Acceptance checks passed.");
 }
 

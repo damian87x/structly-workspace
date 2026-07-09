@@ -79,6 +79,22 @@ function getTriggerCapability({ backendStatus, providerConfigured } = {}) {
   return providerConfigured ? CAPABILITY_STATUS.AVAILABLE : CAPABILITY_STATUS.UNAVAILABLE;
 }
 
+function getSchedulerCapability({ backendStatus, configured } = {}) {
+  if (backendStatus !== CAPABILITY_STATUS.AVAILABLE) {
+    return CAPABILITY_STATUS.OFFLINE;
+  }
+
+  return configured ? CAPABILITY_STATUS.AVAILABLE : CAPABILITY_STATUS.UNKNOWN;
+}
+
+function getCodeExecutionCapability({ backendStatus, configured } = {}) {
+  if (backendStatus !== CAPABILITY_STATUS.AVAILABLE) {
+    return CAPABILITY_STATUS.OFFLINE;
+  }
+
+  return configured ? CAPABILITY_STATUS.CONSTRAINED : CAPABILITY_STATUS.UNKNOWN;
+}
+
 function getDefaultIntegrationHealth(options = {}) {
   const backend = getBackendCapability(options.backend);
   const location = getPermissionCapability(
@@ -94,13 +110,27 @@ function getDefaultIntegrationHealth(options = {}) {
     backendStatus: backend,
     providerConfigured: options.providerConfigured === true,
   });
+  const scheduler = getSchedulerCapability({
+    backendStatus: backend,
+    configured:
+      options.schedulerConfigured === true ||
+      options.scheduler?.configured === true,
+  });
+  const codeExecution = getCodeExecutionCapability({
+    backendStatus: backend,
+    configured:
+      options.codeExecutionConfigured === true ||
+      options.codeExecution?.configured === true,
+  });
 
   return {
     background,
     backgroundNote: BACKGROUND_EXECUTION_NOTE,
     backend,
     calendar,
+    codeExecution,
     location,
+    scheduler,
     triggers,
   };
 }
@@ -118,6 +148,8 @@ function getHealthRows(health) {
     ["Calendar", health.calendar],
     ["Backend", health.backend],
     ["Triggers", health.triggers],
+    ["Schedule Jobs", health.scheduler],
+    ["Code Runs", health.codeExecution],
     ["Background", health.background],
   ].map(([label, status]) => ({ label, status }));
 }
@@ -126,8 +158,10 @@ module.exports = {
   BACKGROUND_EXECUTION_NOTE,
   CAPABILITY_STATUS,
   getBackendCapability,
+  getCodeExecutionCapability,
   getDefaultIntegrationHealth,
   getHealthRows,
   getPermissionCapability,
+  getSchedulerCapability,
   isIntegrationReady,
 };

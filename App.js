@@ -231,8 +231,10 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
   const [backendStatus, setBackendStatus] = useState({
+    codeExecutionConfigured: false,
     providerConfigured: false,
     reachable: false,
+    schedulerConfigured: false,
     stale: true,
   });
   const receiptSheet = useMemo(
@@ -254,7 +256,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           configured: false,
           supported: true,
         },
+        codeExecutionConfigured: backendStatus.codeExecutionConfigured,
         providerConfigured: backendStatus.providerConfigured,
+        schedulerConfigured: backendStatus.schedulerConfigured,
         userId: email,
       }),
     [backendStatus, email],
@@ -306,16 +310,20 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
 
         if (error || !data) {
           setBackendStatus({
+            codeExecutionConfigured: false,
             providerConfigured: false,
             reachable: false,
+            schedulerConfigured: false,
             stale: true,
           });
           return;
         }
 
         setBackendStatus({
+          codeExecutionConfigured: data.codeExecution === "available",
           providerConfigured: data.bridge === "available",
           reachable: data.backend === "available",
+          schedulerConfigured: data.cron === "available",
           stale:
             data.workerHeartbeat === "stale" ||
             data.workerHeartbeat === "failed",
@@ -324,8 +332,10 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
       .catch(() => {
         if (active) {
           setBackendStatus({
+            codeExecutionConfigured: false,
             providerConfigured: false,
             reachable: false,
+            schedulerConfigured: false,
             stale: true,
           });
         }

@@ -18,6 +18,7 @@ const TRIGGER_RUN_STATUS = {
 const SIDE_EFFECT_ACTIONS = new Set([
   "create_calendar_event",
   "create_payment_link",
+  "execute_code",
   "send_email",
   "update_external_sheet",
   "write_external_record",

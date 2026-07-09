@@ -47,11 +47,22 @@ Composio and MCP are backend adapters:
 - Mobile sees only approved catalogs, statuses, approvals, and histories.
 - External side effects require policy checks and, when configured, user approval.
 
+## Phase 4 - Schedules, Location Suggestions, And Code Runs
+
+Scheduled jobs, coarse location suggestions, and sandboxed code execution are backend-owned workflows:
+
+- Schedule ticks enter as durable integration events, then fan out through trigger runs with idempotency keys.
+- Location suggestions use coarse coordinates and user consent. They are suggestions for receipt context, not continuous tracking guarantees.
+- Daytona-style code execution is represented as an approval-required backend request. Mobile never executes code and never carries sandbox API keys.
+- Pixel/Android validation is a release gate because background work and background location are platform-constrained.
+
 ## Release Gates
 
 - `npm test` passes.
+- `npm run test:e2e` passes for the local scenario harness.
 - `npm run audit:oauth` passes.
 - RLS/auth checks prove user isolation.
 - Signed webhook, replay, idempotency, and dead-letter paths are tested.
+- Schedule tick, location suggestion, MCP bridge, and code-execution request paths are tested.
 - Mobile bundle/env audit shows no provider or service-role secrets.
 - Real-device checks cover permission grant, denial, revoke, background, killed app, offline, and resume.
