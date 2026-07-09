@@ -436,6 +436,48 @@ async function verifyTriggerActionsFunction() {
   assert.ok(patchCall.url.includes("id=eq.trigger-1"));
   assert.ok(patchCall.url.includes("user_id=eq.user-1"));
   assert.equal(patchCall.body.status, "paused");
+
+  const resumed = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "resume",
+          triggerId: "trigger-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const resumeCall = calls.find(
+    (call) => call.method === "PATCH" && call.body.status === "active",
+  );
+
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.data.trigger.status, "active");
+  assert.ok(resumeCall.url.includes("id=eq.trigger-1"));
+  assert.ok(resumeCall.url.includes("user_id=eq.user-1"));
+
+  const deleted = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "delete",
+          triggerId: "trigger-1",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const deleteCall = calls.find(
+    (call) => call.method === "PATCH" && call.body.status === "deleted",
+  );
+
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.data.trigger.status, "deleted");
+  assert.ok(deleteCall.url.includes("id=eq.trigger-1"));
+  assert.ok(deleteCall.url.includes("user_id=eq.user-1"));
 }
 
 async function verifyRunActionsFunction() {
