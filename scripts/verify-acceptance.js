@@ -2358,6 +2358,8 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /Daytona-style code execution/);
   assert.match(roadmap, /coarse-only location suggestion from mobile/);
   assert.match(roadmap, /foreground\/resume device heartbeats/);
+  assert.match(roadmap, /dedicated worker token/);
+  assert.match(roadmap, /cannot impersonate worker health/);
   assert.match(roadmap, /user-scoped mobile sync/);
   assert.match(roadmap, /schedule jobs, location suggestions, and code execution request summaries/);
   assert.match(roadmap, /trigger create\/edit\/pause\/resume\/delete/);
@@ -2979,6 +2981,15 @@ function verifyIntegrationHandlersBehavior() {
       now,
       store,
       token: "user-token",
+    }).data.error,
+    "missing_worker_auth",
+  );
+  assert.equal(
+    handleHeartbeatIngest({
+      body: { workerId: "worker-1", userId: "user-1" },
+      now,
+      store,
+      token: "worker-token",
     }).data.status,
     HEARTBEAT_STATUS.FRESH,
   );
@@ -3427,6 +3438,8 @@ function verifySupabaseIntegrationSources() {
     "utf8",
   );
   assert.match(heartbeatSource, /auth\/v1\/user/);
+  assert.match(heartbeatSource, /WORKER_HEARTBEAT_TOKEN/);
+  assert.match(heartbeatSource, /missing_worker_auth/);
   assert.match(heartbeatSource, /user_mismatch/);
   assert.match(heartbeatSource, /device_heartbeats/);
   assert.match(heartbeatSource, /worker_heartbeats/);
@@ -3603,6 +3616,9 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_SERVER_ID/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
+  assert.match(liveSmokeSource, /verifyDeviceHeartbeat/);
+  assert.match(liveSmokeSource, /verifyWorkerHeartbeat/);
   assert.match(liveSmokeSource, /--require-live/);
   assert.match(pixelSmokeSource, /adb/);
   assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
@@ -3620,6 +3636,7 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
   assert.match(liveSmokeDocs, /allowedTools/);
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);

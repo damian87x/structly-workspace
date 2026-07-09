@@ -2,6 +2,13 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
+function hasWorkerAuth(request) {
+  const authorization = request.headers.get("authorization") || "";
+  const workerToken = Deno.env.get("WORKER_HEARTBEAT_TOKEN");
+
+  return Boolean(workerToken && authorization === `Bearer ${workerToken}`);
+}
+
 async function getAuthenticatedUserId(request) {
   const authorization = request.headers.get("authorization") || "";
   const endpoint = Deno.env.get("SUPABASE_URL");
@@ -43,15 +50,6 @@ serve(async (request) => {
     });
   }
 
-  const auth = await getAuthenticatedUserId(request);
-
-  if (auth.error || !auth.userId) {
-    return new Response(JSON.stringify({ error: auth.error }), {
-      headers: jsonHeaders,
-      status: auth.status,
-    });
-  }
-
   const body = await request.json().catch(() => null);
 
   if (!body?.deviceId && !body?.workerId) {
@@ -61,14 +59,32 @@ serve(async (request) => {
     });
   }
 
-  if (!body?.workerId && body?.userId && body.userId !== auth.userId) {
+  if (body.workerId && !hasWorkerAuth(request)) {
+    return new Response(JSON.stringify({ error: "missing_worker_auth" }), {
+      headers: jsonHeaders,
+      status: 401,
+    });
+  }
+
+  const auth = body.workerId
+    ? { error: null, status: 200, userId: null }
+    : await getAuthenticatedUserId(request);
+
+  if (auth.error || (!body.workerId && !auth.userId)) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      headers: jsonHeaders,
+      status: auth.status,
+    });
+  }
+
+  if (!body.workerId && body?.userId && body.userId !== auth.userId) {
     return new Response(JSON.stringify({ error: "user_mismatch" }), {
       headers: jsonHeaders,
       status: 403,
     });
   }
 
-  if (!body?.workerId && !auth.userId) {
+  if (!body.workerId && !auth.userId) {
     return new Response(JSON.stringify({ error: "missing_user_id" }), {
       headers: jsonHeaders,
       status: 400,

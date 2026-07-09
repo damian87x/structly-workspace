@@ -51,6 +51,12 @@ STRUCTLY_TEST_SCHEDULE_TRIGGER_ID="schedule-trigger-id"
 STRUCTLY_TEST_SCHEDULE_TOKEN="schedule-worker-token"
 ```
 
+Worker heartbeat:
+
+```sh
+STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN="backend-worker-heartbeat-token"
+```
+
 MCP bridge:
 
 ```sh
@@ -71,6 +77,8 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 ## What It Verifies
 
 - `status-read` accepts the user token and returns backend status.
+- `heartbeat-ingest` records a Pixel-style device heartbeat with the user token.
+- `heartbeat-ingest` records a backend worker heartbeat only when the worker heartbeat token is configured.
 - `location-suggestions` records a coarse Pixel-style location suggestion when a trigger id is configured.
 - `code-execution-bridge` creates an approval-required backend-owned code request when a trigger id is configured.
 - `code-execution-runner` runs approved TypeScript code inside the configured Daytona sandbox when runner env is configured.

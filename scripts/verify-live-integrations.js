@@ -23,6 +23,7 @@ const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_USER_ID",
 ];
 const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
+const WORKER_HEARTBEAT_ENV = ["STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"];
 
 function getEnv(name) {
   const value = process.env[name];
@@ -54,6 +55,7 @@ function getConfig() {
     scheduleTriggerId: getEnv("STRUCTLY_TEST_SCHEDULE_TRIGGER_ID"),
     userId: getEnv("STRUCTLY_TEST_USER_ID"),
     userToken: getEnv("STRUCTLY_TEST_USER_TOKEN"),
+    workerHeartbeatToken: getEnv("STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"),
   };
 }
 
@@ -96,6 +98,59 @@ async function verifyStatusRead(config) {
   assert.ok(["available", "unavailable"].includes(result.data.bridge));
   assert.ok(["available", "unknown"].includes(result.data.cron));
   assert.ok(["available", "unknown"].includes(result.data.codeExecution));
+
+  return result.data;
+}
+
+async function verifyWorkerHeartbeat(config) {
+  const result = await callFunction({
+    body: {
+      metadata: {
+        source: "live-smoke",
+      },
+      workerId: `live-smoke-worker-${Date.now()}`,
+      workerType: "supabase-edge",
+    },
+    config,
+    functionName: "heartbeat-ingest",
+    token: config.workerHeartbeatToken,
+  });
+
+  assert.equal(
+    result.status,
+    200,
+    `heartbeat-ingest worker failed: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.data.accepted, true);
+  assert.equal(result.data.type, "worker");
+
+  return result.data;
+}
+
+async function verifyDeviceHeartbeat(config) {
+  const result = await callFunction({
+    body: {
+      appState: "active",
+      capabilities: {
+        device: "Pixel",
+        location: "foreground_permission_required",
+        source: "live-smoke",
+      },
+      deviceId: `pixel-live-smoke-${config.userId}`,
+      platform: "android",
+      userId: config.userId,
+    },
+    config,
+    functionName: "heartbeat-ingest",
+  });
+
+  assert.equal(
+    result.status,
+    200,
+    `heartbeat-ingest device failed: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.data.accepted, true);
+  assert.equal(result.data.type, "device");
 
   return result.data;
 }
@@ -342,6 +397,7 @@ async function main() {
   }
 
   const results = {
+    deviceHeartbeat: await verifyDeviceHeartbeat(config),
     status: await verifyStatusRead(config),
   };
 
@@ -367,6 +423,10 @@ async function main() {
 
   if (missingEnv(MCP_ENV).length === 0) {
     results.mcp = await verifyMcpBridge(config);
+  }
+
+  if (missingEnv(WORKER_HEARTBEAT_ENV).length === 0) {
+    results.workerHeartbeat = await verifyWorkerHeartbeat(config);
   }
 
   console.log(

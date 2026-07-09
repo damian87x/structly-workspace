@@ -156,11 +156,23 @@ function verifyE2EFlow() {
     },
     now,
     store,
+    token: "worker-token",
+  });
+  const rejectedWorkerHeartbeat = handleHeartbeatIngest({
+    body: {
+      userId,
+      workerId: "backend-worker-2",
+      workerType: "supabase-edge",
+    },
+    now,
+    store,
     token: "user-token",
   });
 
   assert.equal(deviceHeartbeat.status, 200);
   assert.equal(workerHeartbeat.status, 200);
+  assert.equal(rejectedWorkerHeartbeat.status, 401);
+  assert.equal(rejectedWorkerHeartbeat.data.error, "missing_worker_auth");
   assert.equal(store.deviceHeartbeats[0].platform, "android");
   assert.equal(store.deviceHeartbeats[0].capabilities.device, "Pixel");
 
@@ -393,8 +405,11 @@ function verifyBackendFunctionSources() {
   const statusSource = read("supabase/functions/status-read/index.ts");
 
   assert.match(heartbeatSource, /auth\/v1\/user/);
+  assert.match(heartbeatSource, /WORKER_HEARTBEAT_TOKEN/);
+  assert.match(heartbeatSource, /missing_worker_auth/);
   assert.match(heartbeatSource, /user_mismatch/);
   assert.match(heartbeatSource, /device_heartbeats/);
+  assert.match(heartbeatSource, /worker_heartbeats/);
   assert.match(mobileSyncSource, /auth\/v1\/user/);
   assert.match(mobileSyncSource, /user_id=eq\.\$\{userFilter\}/);
   assert.match(mobileSyncSource, /integration_sources/);

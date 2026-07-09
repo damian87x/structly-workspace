@@ -59,6 +59,7 @@ Scheduled jobs, coarse location suggestions, and sandboxed code execution are ba
 - Daytona-style code execution is represented as an approval-required backend request. Mobile never executes code and never carries sandbox API keys.
 - Approved code execution is performed only by a backend runner using a configured Daytona sandbox id and runner token.
 - The mobile app sends foreground/resume device heartbeats and hydrates trigger/run history through user-scoped mobile sync.
+- Backend workers send heartbeats with a dedicated worker token; user tokens cannot impersonate worker health.
 - Mobile sync also hydrates user-scoped schedule jobs, location suggestions, and code execution request summaries without secret payload fields.
 - The mobile app manages trigger create/edit/pause/resume/delete through authenticated, user-scoped backend actions.
 - The mobile app can approve or deny approval-required trigger runs before backend side effects continue.

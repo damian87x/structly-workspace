@@ -96,18 +96,18 @@ function isProviderTrigger(trigger) {
   );
 }
 
-function handleHeartbeatIngest({ body = {}, now = Date.now(), store, token }) {
-  const authError = requireAuth({ token });
-
-  if (authError) {
-    return authError;
-  }
-
-  if (!body.userId) {
-    return fail("missing_user_id", 400);
-  }
-
+function handleHeartbeatIngest({
+  body = {},
+  now = Date.now(),
+  store,
+  token,
+  workerToken = "worker-token",
+}) {
   if (body.workerId) {
+    if (token !== workerToken) {
+      return fail("missing_worker_auth", 401);
+    }
+
     const heartbeat = createWorkerHeartbeat({
       now,
       workerId: body.workerId,
@@ -120,6 +120,16 @@ function handleHeartbeatIngest({ body = {}, now = Date.now(), store, token }) {
       status: HEARTBEAT_STATUS.FRESH,
       upserted: result.created ? "created" : "updated",
     });
+  }
+
+  const authError = requireAuth({ token });
+
+  if (authError) {
+    return authError;
+  }
+
+  if (!body.userId) {
+    return fail("missing_user_id", 400);
   }
 
   if (!body.deviceId) {

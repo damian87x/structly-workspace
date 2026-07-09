@@ -11,6 +11,7 @@ const DEFAULT_ENV = {
   SUPABASE_ANON_KEY: "anon-key",
   SUPABASE_SERVICE_ROLE_KEY: "service-key",
   SUPABASE_URL: "https://project.supabase.co",
+  WORKER_HEARTBEAT_TOKEN: "worker-heartbeat-token",
 };
 
 function jsonResponse(data, status = 200) {
@@ -280,6 +281,47 @@ async function verifyHeartbeatIngestFunction() {
   assert.equal(heartbeatCall.body.user_id, "user-1");
   assert.equal(heartbeatCall.body.device_id, "pixel-1");
   assert.equal(heartbeatCall.body.capabilities.device, "Pixel");
+
+  const rejectedWorker = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          metadata: { queue: "triggers" },
+          workerId: "worker-1",
+          workerType: "supabase-edge",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejectedWorker.status, 401);
+  assert.equal(rejectedWorker.data.error, "missing_worker_auth");
+
+  const acceptedWorker = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          metadata: { queue: "triggers" },
+          workerId: "worker-1",
+          workerType: "supabase-edge",
+        },
+        headers: { Authorization: "Bearer worker-heartbeat-token" },
+      }),
+    ),
+  );
+  const workerCall = calls.find((call) =>
+    call.url.includes("/worker_heartbeats"),
+  );
+
+  assert.equal(acceptedWorker.status, 200);
+  assert.equal(acceptedWorker.data.type, "worker");
+  assert.equal(acceptedWorker.data.persisted, true);
+  assert.ok(workerCall);
+  assert.equal(workerCall.body.worker_id, "worker-1");
+  assert.equal(workerCall.body.worker_type, "supabase-edge");
+  assert.equal(workerCall.body.metadata.queue, "triggers");
+  assert.equal(workerCall.body.user_id, undefined);
 }
 
 async function verifyTriggerActionsFunction() {
