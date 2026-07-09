@@ -44,13 +44,18 @@ function buildMcpToolInvocation({
   serverUrl,
   toolName,
 }) {
-  return {
+  const invocation = {
     arguments: args,
     serverId,
-    serverUrl,
     toolName,
     transport: MCP_TRANSPORT.STREAMABLE_HTTP,
   };
+
+  if (serverUrl) {
+    invocation.serverUrl = serverUrl;
+  }
+
+  return invocation;
 }
 
 module.exports = {

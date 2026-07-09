@@ -51,6 +51,23 @@ STRUCTLY_TEST_SCHEDULE_TRIGGER_ID="schedule-trigger-id"
 STRUCTLY_TEST_SCHEDULE_TOKEN="schedule-worker-token"
 ```
 
+MCP bridge:
+
+```sh
+STRUCTLY_TEST_MCP_SERVER_ID="enabled-mcp-source-id-or-source-key"
+STRUCTLY_TEST_MCP_TOOL_NAME="optional-approved-tool-name"
+STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON='{"receiptId":"receipt-id"}'
+```
+
+The MCP smoke expects an enabled `integration_sources` row for the test user with `source_type = 'mcp'`. Its `capabilities` JSON must include a public `serverUrl` and, for tool calls, an `allowedTools` array containing the tool name:
+
+```json
+{
+  "serverUrl": "https://mcp.example.com/mcp",
+  "allowedTools": ["append_receipt"]
+}
+```
+
 ## What It Verifies
 
 - `status-read` accepts the user token and returns backend status.
@@ -59,3 +76,4 @@ STRUCTLY_TEST_SCHEDULE_TOKEN="schedule-worker-token"
 - `code-execution-runner` runs approved TypeScript code inside the configured Daytona sandbox when runner env is configured.
 - `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.
 - `schedule-jobs` accepts only the worker token and queues one idempotent schedule event when schedule env is configured.
+- `mcp-bridge` lists tools from an enabled user-owned MCP source, and optionally calls one approved tool when MCP tool env is configured.

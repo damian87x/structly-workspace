@@ -45,7 +45,7 @@ Composio and MCP are backend adapters:
 - Composio events enter through signed backend webhooks.
 - Production Composio webhooks must set `COMPOSIO_WEBHOOK_SECRET` and verify the raw-body signature before parsing.
 - MCP tools are exposed through a backend bridge and approved catalog.
-- MCP bridge calls are authenticated, user-scoped Streamable HTTP JSON-RPC requests for `tools/list` and `tools/call`; mobile never runs stdio/local MCP servers.
+- MCP bridge calls are authenticated, user-scoped Streamable HTTP JSON-RPC requests for `tools/list` and approved `tools/call` entries from enabled backend `integration_sources`; mobile never runs stdio/local MCP servers or chooses arbitrary server URLs.
 - Mobile sees only approved catalogs, statuses, approvals, and histories.
 - External side effects require policy checks and, when configured, user approval.
 

@@ -308,13 +308,11 @@ function verifyE2EFlow() {
     buildMcpToolInvocation({
       arguments: { receiptId: "receipt-1" },
       serverId: "mcp-receipts",
-      serverUrl: "https://mcp.example.test/mcp",
       toolName: "append_receipt",
     }),
     {
       arguments: { receiptId: "receipt-1" },
       serverId: "mcp-receipts",
-      serverUrl: "https://mcp.example.test/mcp",
       toolName: "append_receipt",
       transport: MCP_TRANSPORT.STREAMABLE_HTTP,
     },
@@ -435,11 +433,16 @@ function verifyBackendFunctionSources() {
   assert.match(mcpSource, /tools\/list/);
   assert.match(mcpSource, /tools\/call/);
   assert.match(mcpSource, /application\/json, text\/event-stream/);
+  assert.match(mcpSource, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(mcpSource, /integration_sources/);
+  assert.match(mcpSource, /allowedTools/);
+  assert.match(mcpSource, /mcp_tool_not_allowed/);
+  assert.match(mcpSource, /mcp_server_mismatch/);
   assert.match(mcpSource, /blockedHostPattern/);
   assert.match(mcpSource, /isSafeRemoteHttpUrl/);
   assert.match(mcpSource, /remote_http_required/);
   assert.match(mcpSource, /mcp_request_failed/);
-  assert.doesNotMatch(mcpSource, /MCP_API_KEY|service_role/i);
+  assert.doesNotMatch(mcpSource, /MCP_API_KEY/);
   assert.match(codeSource, /auth\/v1\/user/);
   assert.match(codeSource, /user_mismatch/);
   assert.match(codeSource, /DAYTONA_API_KEY/);

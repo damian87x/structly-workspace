@@ -2352,6 +2352,8 @@ function verifyIntegrationRoadmap() {
   );
   assert.match(roadmap, /Default runtime is Supabase-only/);
   assert.match(roadmap, /Composio and MCP are backend adapters/);
+  assert.match(roadmap, /enabled backend `integration_sources`/);
+  assert.match(roadmap, /arbitrary server URLs/);
   assert.match(roadmap, /Schedules, Location Suggestions, And Code Runs/);
   assert.match(roadmap, /Daytona-style code execution/);
   assert.match(roadmap, /coarse-only location suggestion from mobile/);
@@ -3252,13 +3254,11 @@ function verifyMcpBridgeBackendOnlySource() {
     buildMcpToolInvocation({
       arguments: { id: "receipt-1" },
       serverId: "server-1",
-      serverUrl: "https://mcp.example.com/mcp",
       toolName: "safe",
     }),
     {
       arguments: { id: "receipt-1" },
       serverId: "server-1",
-      serverUrl: "https://mcp.example.com/mcp",
       toolName: "safe",
       transport: MCP_TRANSPORT.STREAMABLE_HTTP,
     },
@@ -3269,6 +3269,11 @@ function verifyMcpBridgeBackendOnlySource() {
   assert.match(functionSource, /tools\/list/);
   assert.match(functionSource, /tools\/call/);
   assert.match(functionSource, /application\/json, text\/event-stream/);
+  assert.match(functionSource, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(functionSource, /integration_sources/);
+  assert.match(functionSource, /allowedTools/);
+  assert.match(functionSource, /mcp_tool_not_allowed/);
+  assert.match(functionSource, /mcp_server_mismatch/);
   assert.match(functionSource, /blockedHostPattern/);
   assert.match(functionSource, /isSafeRemoteHttpUrl/);
   assert.match(functionSource, /remote_http_required/);
@@ -3593,8 +3598,11 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyDaytonaExecution/);
   assert.match(liveSmokeSource, /verifyComposioWebhook/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
+  assert.match(liveSmokeSource, /verifyMcpBridge/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON/);
   assert.match(liveSmokeSource, /--require-live/);
   assert.match(pixelSmokeSource, /adb/);
   assert.match(pixelSmokeSource, /STRUCTLY_PIXEL_SERIAL/);
@@ -3611,6 +3619,8 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
   assert.match(liveSmokeDocs, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(liveSmokeDocs, /allowedTools/);
   assert.match(pixelSmokeDocs, /npm run test:pixel/);
   assert.match(pixelSmokeDocs, /Google Pixel/);
   assert.match(pixelSmokeDocs, /STRUCTLY_ANDROID_PACKAGE/);

@@ -22,6 +22,7 @@ const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_TRIGGER_ID",
   "STRUCTLY_TEST_COMPOSIO_USER_ID",
 ];
+const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
 
 function getEnv(name) {
   const value = process.env[name];
@@ -45,6 +46,9 @@ function getConfig() {
     functionsUrl,
     daytonaSandboxId: getEnv("STRUCTLY_TEST_DAYTONA_SANDBOX_ID"),
     locationTriggerId: getEnv("STRUCTLY_TEST_LOCATION_TRIGGER_ID"),
+    mcpServerId: getEnv("STRUCTLY_TEST_MCP_SERVER_ID"),
+    mcpToolArgumentsJson: getEnv("STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON"),
+    mcpToolName: getEnv("STRUCTLY_TEST_MCP_TOOL_NAME"),
     requireLive: process.argv.includes("--require-live"),
     scheduleToken: getEnv("STRUCTLY_TEST_SCHEDULE_TOKEN"),
     scheduleTriggerId: getEnv("STRUCTLY_TEST_SCHEDULE_TRIGGER_ID"),
@@ -260,6 +264,68 @@ async function verifyScheduleJob(config) {
   return result.data;
 }
 
+function parseMcpToolArguments(config) {
+  if (!config.mcpToolArgumentsJson) {
+    return {};
+  }
+
+  const parsed = JSON.parse(config.mcpToolArgumentsJson);
+
+  assert.equal(
+    parsed && typeof parsed === "object" && !Array.isArray(parsed),
+    true,
+    "STRUCTLY_TEST_MCP_TOOL_ARGUMENTS_JSON must be a JSON object.",
+  );
+
+  return parsed;
+}
+
+async function verifyMcpBridge(config) {
+  const listed = await callFunction({
+    body: {
+      action: "list_tools",
+      requestId: `live-mcp-list-${Date.now()}`,
+      serverId: config.mcpServerId,
+      transport: "streamable_http",
+      userId: config.userId,
+    },
+    config,
+    functionName: "mcp-bridge",
+  });
+
+  assert.equal(listed.status, 200, `mcp-bridge list failed: ${JSON.stringify(listed)}`);
+  assert.equal(listed.data.accepted, true);
+  assert.equal(listed.data.action, "list_tools");
+  assert.equal(
+    listed.data.sourceKey === config.mcpServerId ||
+      listed.data.serverId === config.mcpServerId,
+    true,
+  );
+
+  if (!config.mcpToolName) {
+    return { listed: listed.data };
+  }
+
+  const called = await callFunction({
+    body: {
+      arguments: parseMcpToolArguments(config),
+      requestId: `live-mcp-call-${Date.now()}`,
+      serverId: config.mcpServerId,
+      toolName: config.mcpToolName,
+      transport: "streamable_http",
+      userId: config.userId,
+    },
+    config,
+    functionName: "mcp-bridge",
+  });
+
+  assert.equal(called.status, 200, `mcp-bridge call failed: ${JSON.stringify(called)}`);
+  assert.equal(called.data.accepted, true);
+  assert.equal(called.data.action, "call_tool");
+
+  return { called: called.data, listed: listed.data };
+}
+
 async function main() {
   const config = getConfig();
   const missingRequired = missingEnv(REQUIRED_ENV);
@@ -297,6 +363,10 @@ async function main() {
 
   if (missingEnv(SCHEDULE_ENV).length === 0) {
     results.schedule = await verifyScheduleJob(config);
+  }
+
+  if (missingEnv(MCP_ENV).length === 0) {
+    results.mcp = await verifyMcpBridge(config);
   }
 
   console.log(

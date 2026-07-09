@@ -564,7 +564,8 @@ async function verifyLocationSuggestionsFunction() {
 }
 
 async function verifyMcpBridgeFunction() {
-  const calls = [];
+  const catalogCalls = [];
+  const remoteCalls = [];
   const handler = loadEdgeHandler("supabase/functions/mcp-bridge/index.ts", {
     fetchImpl: async (url, options = {}) => {
       const requestUrl = String(url);
@@ -575,7 +576,34 @@ async function verifyMcpBridgeFunction() {
           : jsonResponse({ error: "invalid" }, 401);
       }
 
-      calls.push({
+      if (requestUrl.includes("/rest/v1/integration_sources")) {
+        catalogCalls.push({
+          headers: options.headers || {},
+          method: options.method || "GET",
+          url: requestUrl,
+        });
+
+        return jsonResponse([
+          {
+            capabilities: {
+              allowedTools: ["append_receipt"],
+              serverUrl: "https://mcp.example.test/mcp",
+            },
+            id: "mcp-source-1",
+            source_key: "mcp-receipts",
+          },
+          {
+            capabilities: {
+              allowedTools: ["unsafe"],
+              serverUrl: "http://127.0.0.1:8787/mcp",
+            },
+            id: "mcp-source-local",
+            source_key: "mcp-local",
+          },
+        ]);
+      }
+
+      remoteCalls.push({
         body: parseBody(options),
         headers: options.headers || {},
         method: options.method || "GET",
@@ -583,7 +611,7 @@ async function verifyMcpBridgeFunction() {
       });
 
       return jsonResponse({
-        id: calls[calls.length - 1].body.id,
+        id: remoteCalls[remoteCalls.length - 1].body.id,
         jsonrpc: "2.0",
         result: { content: [{ text: "ok", type: "text" }] },
       });
@@ -595,7 +623,7 @@ async function verifyMcpBridgeFunction() {
       createJsonRequest({
         body: {
           action: "list_tools",
-          serverUrl: "https://mcp.example.test/mcp",
+          serverId: "mcp-receipts",
           transport: "streamable_http",
         },
         headers: { Authorization: "Bearer invalid-token" },
@@ -604,14 +632,15 @@ async function verifyMcpBridgeFunction() {
   );
 
   assert.equal(rejected.status, 401);
-  assert.equal(calls.length, 0);
+  assert.equal(catalogCalls.length, 0);
+  assert.equal(remoteCalls.length, 0);
 
   const mismatch = await readJson(
     await handler(
       createJsonRequest({
         body: {
           action: "list_tools",
-          serverUrl: "https://mcp.example.test/mcp",
+          serverId: "mcp-receipts",
           transport: "streamable_http",
           userId: "user-2",
         },
@@ -622,14 +651,15 @@ async function verifyMcpBridgeFunction() {
 
   assert.equal(mismatch.status, 403);
   assert.equal(mismatch.data.error, "user_mismatch");
-  assert.equal(calls.length, 0);
+  assert.equal(catalogCalls.length, 0);
+  assert.equal(remoteCalls.length, 0);
 
   const invalidTransport = await readJson(
     await handler(
       createJsonRequest({
         body: {
           action: "list_tools",
-          serverUrl: "file:///tmp/mcp.sock",
+          serverId: "mcp-receipts",
           transport: "stdio",
           userId: "user-1",
         },
@@ -640,14 +670,15 @@ async function verifyMcpBridgeFunction() {
 
   assert.equal(invalidTransport.status, 400);
   assert.equal(invalidTransport.data.error, "remote_http_required");
-  assert.equal(calls.length, 0);
+  assert.equal(catalogCalls.length, 0);
+  assert.equal(remoteCalls.length, 0);
 
   const localTarget = await readJson(
     await handler(
       createJsonRequest({
         body: {
           action: "list_tools",
-          serverUrl: "http://127.0.0.1:8787/mcp",
+          serverId: "mcp-local",
           transport: "streamable_http",
           userId: "user-1",
         },
@@ -658,15 +689,15 @@ async function verifyMcpBridgeFunction() {
 
   assert.equal(localTarget.status, 400);
   assert.equal(localTarget.data.error, "remote_http_required");
-  assert.equal(calls.length, 0);
+  assert.equal(remoteCalls.length, 0);
 
-  const listed = await readJson(
+  const serverMismatch = await readJson(
     await handler(
       createJsonRequest({
         body: {
           action: "list_tools",
-          requestId: "mcp-list-1",
-          serverUrl: "https://mcp.example.test/mcp",
+          serverId: "mcp-receipts",
+          serverUrl: "https://evil.example.test/mcp",
           transport: "streamable_http",
           userId: "user-1",
         },
@@ -674,12 +705,52 @@ async function verifyMcpBridgeFunction() {
       }),
     ),
   );
-  const listCall = calls.find((call) => call.body.method === "tools/list");
+
+  assert.equal(serverMismatch.status, 403);
+  assert.equal(serverMismatch.data.error, "mcp_server_mismatch");
+  assert.equal(remoteCalls.length, 0);
+
+  const disallowedTool = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          requestId: "mcp-denied-1",
+          serverId: "mcp-receipts",
+          toolName: "delete_everything",
+          transport: "streamable_http",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(disallowedTool.status, 403);
+  assert.equal(disallowedTool.data.error, "mcp_tool_not_allowed");
+  assert.equal(remoteCalls.length, 0);
+
+  const listed = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          action: "list_tools",
+          requestId: "mcp-list-1",
+          serverId: "mcp-receipts",
+          transport: "streamable_http",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const listCall = remoteCalls.find((call) => call.body.method === "tools/list");
 
   assert.equal(listed.status, 200);
   assert.equal(listed.data.action, "list_tools");
+  assert.equal(listed.data.sourceKey, "mcp-receipts");
   assert.ok(listCall);
   assert.equal(listCall.method, "POST");
+  assert.equal(listCall.url, "https://mcp.example.test/mcp");
   assert.equal(listCall.headers.Accept, "application/json, text/event-stream");
   assert.equal(listCall.body.id, "mcp-list-1");
   assert.equal(listCall.body.jsonrpc, "2.0");
@@ -691,7 +762,7 @@ async function verifyMcpBridgeFunction() {
         body: {
           arguments: { receiptId: "receipt-1" },
           requestId: "mcp-call-1",
-          serverUrl: "https://mcp.example.test/mcp",
+          serverId: "mcp-receipts",
           toolName: "append_receipt",
           transport: "streamable_http",
           userId: "user-1",
@@ -700,11 +771,15 @@ async function verifyMcpBridgeFunction() {
       }),
     ),
   );
-  const toolCall = calls.find((call) => call.body.method === "tools/call");
+  const toolCall = remoteCalls.find((call) => call.body.method === "tools/call");
 
   assert.equal(called.status, 200);
   assert.equal(called.data.action, "call_tool");
   assert.ok(toolCall);
+  assert.ok(catalogCalls.length >= 4);
+  assert.ok(catalogCalls.every((call) => call.url.includes("source_type=eq.mcp")));
+  assert.ok(catalogCalls.every((call) => call.url.includes("enabled=eq.true")));
+  assert.ok(catalogCalls.every((call) => call.url.includes("user_id=eq.user-1")));
   assert.equal(toolCall.body.id, "mcp-call-1");
   assert.equal(toolCall.body.params.name, "append_receipt");
   assert.deepEqual(toolCall.body.params.arguments, { receiptId: "receipt-1" });
