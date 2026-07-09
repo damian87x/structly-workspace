@@ -166,7 +166,19 @@ async function verifyMobileSyncFunction() {
         "code_execution_requests": [
           { id: "code-1", language: "typescript", status: "approval_required" },
         ],
-        "integration_sources": [{ id: "source-1", source_key: "composio" }],
+        "integration_sources": [
+          {
+            capabilities: {
+              allowedTools: ["append_receipt", "create_task"],
+              serverUrl: "https://mcp.example.test/mcp",
+            },
+            display_name: "Receipt MCP",
+            enabled: true,
+            id: "source-1",
+            source_key: "mcp-receipts",
+            source_type: "mcp",
+          },
+        ],
         "location_event_suggestions": [
           { id: "location-1", place_label: "Soho Market" },
         ],
@@ -204,6 +216,10 @@ async function verifyMobileSyncFunction() {
   assert.equal(accepted.status, 200);
   assert.equal(accepted.data.codeExecutionRequests.length, 1);
   assert.equal(accepted.data.connectors.length, 1);
+  assert.equal(accepted.data.connectors[0].source_key, "mcp-receipts");
+  assert.equal(accepted.data.connectors[0].tool_count, 2);
+  assert.equal(accepted.data.connectors[0].capabilities, undefined);
+  assert.equal(accepted.data.connectors[0].serverUrl, undefined);
   assert.equal(accepted.data.locationSuggestions.length, 1);
   assert.equal(accepted.data.triggerDefinitions.length, 1);
   assert.equal(accepted.data.runHistory.length, 1);

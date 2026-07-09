@@ -3420,6 +3420,10 @@ function verifySupabaseIntegrationSources() {
     fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
     /auth\/v1\/user[\s\S]*user_id=eq\.\$\{userFilter\}[\s\S]*integration_sources[\s\S]*schedule_jobs[\s\S]*location_event_suggestions[\s\S]*code_execution_requests/,
   );
+  assert.match(
+    fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
+    /sanitizeConnector[\s\S]*tool_count/,
+  );
   assert.doesNotMatch(
     fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
     /environment|request_payload/,

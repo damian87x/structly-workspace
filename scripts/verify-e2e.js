@@ -414,6 +414,8 @@ function verifyBackendFunctionSources() {
   assert.match(mobileSyncSource, /auth\/v1\/user/);
   assert.match(mobileSyncSource, /user_id=eq\.\$\{userFilter\}/);
   assert.match(mobileSyncSource, /integration_sources/);
+  assert.match(mobileSyncSource, /sanitizeConnector/);
+  assert.match(mobileSyncSource, /tool_count/);
   assert.match(mobileSyncSource, /schedule_jobs/);
   assert.match(mobileSyncSource, /location_event_suggestions/);
   assert.match(mobileSyncSource, /code_execution_requests/);

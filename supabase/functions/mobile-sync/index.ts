@@ -35,6 +35,25 @@ async function getAuthenticatedUserId(request) {
   return { error: null, status: 200, userId: String(user.id) };
 }
 
+function sanitizeConnector(source = {}) {
+  const capabilities =
+    source.capabilities && typeof source.capabilities === "object"
+      ? source.capabilities
+      : {};
+  const allowedTools = Array.isArray(capabilities.allowedTools)
+    ? capabilities.allowedTools
+    : [];
+
+  return {
+    display_name: source.display_name,
+    enabled: source.enabled,
+    id: source.id,
+    source_key: source.source_key,
+    source_type: source.source_type,
+    tool_count: allowedTools.length,
+  };
+}
+
 serve(async (request) => {
   if (request.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {
@@ -110,7 +129,7 @@ serve(async (request) => {
     }
 
     if (sources.ok) {
-      connectors = await sources.json();
+      connectors = (await sources.json()).map(sanitizeConnector);
     }
 
     if (schedules.ok) {
