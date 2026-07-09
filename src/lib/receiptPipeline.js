@@ -23,7 +23,10 @@ async function processReceipts(images, { vision } = {}) {
   for (const [index, image] of imageList.entries()) {
     try {
       const receipt = await extractReceipt(image, { client: vision });
-      receipts.push(receipt);
+      receipts.push({
+        ...receipt,
+        sourceUri: receipt.sourceUri || image?.uri || null,
+      });
     } catch (error) {
       failures.push({
         error: normalizeError(error),

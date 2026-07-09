@@ -1,6 +1,7 @@
 const FIELD_COLUMNS = ["vendor", "date", "net", "vat", "gross", "category"];
 const CONTEXT_COLUMNS = ["location", "billable_client"];
-const COLUMNS = [...FIELD_COLUMNS, ...CONTEXT_COLUMNS];
+const AUDIT_COLUMNS = ["source_uri", "review_status", "review_reasons"];
+const COLUMNS = [...FIELD_COLUMNS, ...CONTEXT_COLUMNS, ...AUDIT_COLUMNS];
 const HEADER_ROW = COLUMNS.join(",");
 const READY_STATUS = {
   EMPTY: "empty",
@@ -58,6 +59,10 @@ function getIssues(receipt) {
   return Array.isArray(issues) ? issues : [];
 }
 
+function getSourceUri(receipt) {
+  return receipt?.sourceUri || receipt?.imageUri || receipt?.uri || null;
+}
+
 function getIssueReason(issue) {
   if (issue && typeof issue.message === "string" && issue.message.trim()) {
     return issue.message;
@@ -91,7 +96,7 @@ function buildNeedsReviewRows(receipts) {
 }
 
 function hasSourceProof(receipt) {
-  return Boolean(receipt?.sourceUri || receipt?.imageUri || receipt?.uri);
+  return Boolean(getSourceUri(receipt));
 }
 
 function buildMissingProofRows(receipts) {
@@ -385,10 +390,19 @@ function buildCsv(receipts) {
   const rows = receipts.map((receipt) => {
     const fields = getFields(receipt);
     const contextFields = getContextFields(receipt);
+    const issues = getIssues(receipt);
+    const needsReview =
+      Boolean(receipt?.validation?.needsReview) || issues.length > 0;
+    const auditFields = {
+      review_reasons: issues.map(getIssueReason).join("; "),
+      review_status: needsReview ? "needs_review" : "ready",
+      source_uri: getSourceUri(receipt),
+    };
 
     return [
       ...FIELD_COLUMNS.map((field) => escapeCsvCell(fields[field])),
       ...CONTEXT_COLUMNS.map((field) => escapeCsvCell(contextFields[field])),
+      ...AUDIT_COLUMNS.map((field) => escapeCsvCell(auditFields[field])),
     ].join(",");
   });
 

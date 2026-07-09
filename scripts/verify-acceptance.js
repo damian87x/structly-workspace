@@ -1012,10 +1012,10 @@ function verifyBuildSpreadsheetModule() {
   ]);
 
   assert.deepEqual(cleanSheet.csv.split("\n"), [
-    "vendor,date,net,vat,gross,category,location,billable_client",
-    "Acme Supplies,2026-07-01,10,2,12,Office,,",
-    "Enriched Taxi,2026-07-03,15,3,18,Travel,Soho Market,Acme Ltd",
-    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team",,',
+    "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
+    "Acme Supplies,2026-07-01,10,2,12,Office,,,file://acme-supplies.jpg,ready,",
+    "Enriched Taxi,2026-07-03,15,3,18,Travel,Soho Market,Acme Ltd,file://enriched-taxi.jpg,ready,",
+    '"Comma, ""Quote"" Ltd",2026-07-02,5.5,1.1,6.6,"Meals, team",,,file://comma-quote.jpg,ready,',
   ]);
   assert.deepEqual(cleanSheet.validation.needsReviewRows, []);
   assert.deepEqual(cleanSheet.validation.duplicates, []);
@@ -1394,9 +1394,9 @@ async function verifyExportReviewedReceiptsHelper() {
     },
   ];
   const expectedCsv = [
-    "vendor,date,net,vat,gross,category,location,billable_client",
-    "Reviewed Market,2026-07-07,20,4,24,Office,,",
-    "Review Cafe,2026-07-08,10,2,13.5,Meals,,",
+    "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
+    "Reviewed Market,2026-07-07,20,4,24,Office,,,file://reviewed-market.jpg,ready,",
+    "Review Cafe,2026-07-08,10,2,13.5,Meals,,,file://review-cafe.jpg,needs_review,net plus VAT does not equal gross.",
   ].join("\n");
   const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
   const expectedHandoffNote = [
@@ -1712,6 +1712,9 @@ function verifyReceiptContextReviewHelper() {
     "Meals",
     "",
     "",
+    "",
+    "ready",
+    "",
   ].join(","));
 
 
@@ -1758,6 +1761,9 @@ function verifyReceiptContextReviewHelper() {
     "24",
     "Meals",
     "",
+    "",
+    "",
+    "ready",
     "",
   ].join(","));
 
@@ -1920,9 +1926,9 @@ async function verifyReceiptPipelineModule() {
     assert.deepEqual(result.failures[0].image, images[2]);
     assert.equal(result.failures[0].error.message, "Vision extraction failed.");
     assert.deepEqual(result.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category,location,billable_client",
-      "Clean Market,2026-07-05,20,4,24,Office,,",
-      "Review Cafe,2026-07-06,10,2,13.5,Meals,,",
+      "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
+      "Clean Market,2026-07-05,20,4,24,Office,,,file://clean.jpg,ready,",
+      "Review Cafe,2026-07-06,10,2,13.5,Meals,,,file://flagged.jpg,needs_review,net plus VAT does not equal gross.",
     ]);
     assert.equal(result.sheet.validation.needsReviewCount, 1);
     assert.deepEqual(result.sheet.validation.needsReviewRows, [
@@ -2581,8 +2587,8 @@ async function verifyEnrichReceiptModule() {
     assert.equal(pipelineResult.receipts.length, 1);
     assert.equal(pipelineResult.failures.length, 0);
     assert.deepEqual(pipelineResult.sheet.csv.split("\n"), [
-      "vendor,date,net,vat,gross,category,location,billable_client",
-      "Pipeline Cafe,2026-07-08,20,4,24,Meals,,",
+      "vendor,date,net,vat,gross,category,location,billable_client,source_uri,review_status,review_reasons",
+      "Pipeline Cafe,2026-07-08,20,4,24,Meals,,,file://pipeline-enrichment.jpg,ready,",
     ]);
     assert.equal(pipelineResult.sheet.validation.needsReviewCount, 0);
     assert.equal(await pendingEnrichment, pipelineReceipt);
