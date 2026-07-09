@@ -23,14 +23,14 @@ npm run test:live -- --require-all-integrations
 
 ## Local Supabase Smoke
 
-When local Supabase is running, this command applies pending local migrations, starts a temporary Edge Functions runtime, signs in with the seeded demo account, creates throwaway trigger fixtures, and runs the live smoke for backend-owned paths that do not require external MCP or Daytona services:
+When local Supabase is running, this command applies pending local migrations, starts a temporary Edge Functions runtime, signs in with the seeded demo account, creates throwaway trigger fixtures, and runs the live smoke for backend-owned paths that do not require external MCP or real Daytona credentials:
 
 ```sh
 supabase start
 npm run test:live:local
 ```
 
-It verifies device heartbeat, worker heartbeat, status, location suggestion, trigger dispatch, trigger lifecycle actions, code execution request creation, signed Composio webhook ingestion, and schedule tick ingestion against local Edge Functions.
+It verifies device heartbeat, worker heartbeat, status, location suggestion, trigger dispatch, trigger lifecycle actions, code execution request creation, Daytona runner handling with a local mock result, signed Composio webhook ingestion, and schedule tick ingestion against local Edge Functions.
 
 ## Optional Paths
 

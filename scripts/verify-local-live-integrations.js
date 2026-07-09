@@ -19,6 +19,10 @@ const WORKER_HEARTBEAT_TOKEN =
 const COMPOSIO_WEBHOOK_SECRET =
   process.env.STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET ||
   "local-composio-webhook-secret";
+const CODE_RUNNER_TOKEN =
+  process.env.STRUCTLY_TEST_CODE_RUNNER_TOKEN || "local-code-runner-token";
+const DAYTONA_SANDBOX_ID =
+  process.env.STRUCTLY_TEST_DAYTONA_SANDBOX_ID || "local-daytona-sandbox";
 
 function unquote(value) {
   return String(value || "").replace(/^['"]|['"]$/g, "");
@@ -65,9 +69,10 @@ function writeFunctionEnvFile() {
   const contents = [
     `SCHEDULE_JOBS_TOKEN=${SCHEDULE_TOKEN}`,
     `WORKER_HEARTBEAT_TOKEN=${WORKER_HEARTBEAT_TOKEN}`,
-    "CODE_EXECUTION_RUNNER_TOKEN=local-code-runner-token",
+    `CODE_EXECUTION_RUNNER_TOKEN=${CODE_RUNNER_TOKEN}`,
     "DAYTONA_API_KEY=local-daytona-api-key",
-    "DAYTONA_SANDBOX_ID=local-daytona-sandbox",
+    `DAYTONA_SANDBOX_ID=${DAYTONA_SANDBOX_ID}`,
+    "DAYTONA_MOCK_RESULT=local-daytona-ok",
     `COMPOSIO_WEBHOOK_SECRET=${COMPOSIO_WEBHOOK_SECRET}`,
     "",
   ].join("\n");
@@ -267,10 +272,12 @@ async function main() {
     runLiveSmoke({
       ...process.env,
       STRUCTLY_FUNCTIONS_URL: functionsUrl,
+      STRUCTLY_TEST_CODE_RUNNER_TOKEN: CODE_RUNNER_TOKEN,
       STRUCTLY_TEST_CODE_TRIGGER_ID: fixtures.codeTriggerId,
       STRUCTLY_TEST_COMPOSIO_TRIGGER_ID: fixtures.composioTriggerId,
       STRUCTLY_TEST_COMPOSIO_USER_ID: session.user.id,
       STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET: COMPOSIO_WEBHOOK_SECRET,
+      STRUCTLY_TEST_DAYTONA_SANDBOX_ID: DAYTONA_SANDBOX_ID,
       STRUCTLY_TEST_LOCATION_TRIGGER_ID: fixtures.locationTriggerId,
       STRUCTLY_TEST_SCHEDULE_TOKEN: SCHEDULE_TOKEN,
       STRUCTLY_TEST_SCHEDULE_TRIGGER_ID: fixtures.scheduleTriggerId,

@@ -28,6 +28,25 @@ function normalizeTimeoutSeconds(value) {
   return Math.max(1, Math.min(60, Math.round(value)));
 }
 
+function getDaytonaProxyBaseUrl() {
+  return (Deno.env.get("DAYTONA_PROXY_BASE_URL") || "https://proxy.app.daytona.io").replace(
+    /\/+$/,
+    "",
+  );
+}
+
+function getDaytonaMockResponse() {
+  const result = Deno.env.get("DAYTONA_MOCK_RESULT");
+
+  if (!result) {
+    return null;
+  }
+
+  return new Response(JSON.stringify({ result }), {
+    headers: jsonHeaders,
+  });
+}
+
 async function updateCodeRequestStatus({ endpoint, requestId, result, serviceKey, status }) {
   if (!endpoint || !serviceKey || !requestId) {
     return;
@@ -51,10 +70,16 @@ async function updateCodeRequestStatus({ endpoint, requestId, result, serviceKey
 
 async function callDaytona({ apiKey, body, sandboxId }) {
   const timeoutSeconds = normalizeTimeoutSeconds(body.timeoutSeconds);
+  const baseUrl = getDaytonaProxyBaseUrl();
+  const mockResponse = getDaytonaMockResponse();
+
+  if (mockResponse) {
+    return mockResponse;
+  }
 
   if (body.command) {
     return fetch(
-      `https://proxy.app.daytona.io/toolbox/${encodeURIComponent(sandboxId)}/process/execute`,
+      `${baseUrl}/toolbox/${encodeURIComponent(sandboxId)}/process/execute`,
       {
         body: JSON.stringify({
           command: body.command,
@@ -72,7 +97,7 @@ async function callDaytona({ apiKey, body, sandboxId }) {
   }
 
   return fetch(
-    `https://proxy.app.daytona.io/toolbox/${encodeURIComponent(sandboxId)}/process/code-run`,
+    `${baseUrl}/toolbox/${encodeURIComponent(sandboxId)}/process/code-run`,
     {
       body: JSON.stringify({
         code: body.code,

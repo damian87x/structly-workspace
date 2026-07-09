@@ -1036,6 +1036,7 @@ async function verifyCodeExecutionRunnerFunction() {
       env: {
         ...DEFAULT_ENV,
         CODE_EXECUTION_RUNNER_TOKEN: "runner-token",
+        DAYTONA_PROXY_BASE_URL: "https://daytona.local.test",
         DAYTONA_SANDBOX_ID: "sandbox-1",
       },
       fetchImpl: async (url, options = {}) => {
@@ -1048,7 +1049,7 @@ async function verifyCodeExecutionRunnerFunction() {
           url: requestUrl,
         });
 
-        if (requestUrl.includes("proxy.app.daytona.io")) {
+        if (requestUrl.includes("daytona.local.test")) {
           return jsonResponse({ result: "ok" });
         }
 
@@ -1100,6 +1101,10 @@ async function verifyCodeExecutionRunnerFunction() {
   );
 
   assert.ok(daytonaCall);
+  assert.equal(
+    daytonaCall.url,
+    "https://daytona.local.test/toolbox/sandbox-1/process/code-run",
+  );
   assert.equal(daytonaCall.headers.Authorization, "Bearer daytona-key");
   assert.equal(daytonaCall.body.code, "console.log('ok')");
   assert.equal(daytonaCall.body.language, "typescript");

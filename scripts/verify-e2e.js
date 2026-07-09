@@ -475,6 +475,8 @@ function verifyBackendFunctionSources() {
   assert.match(codeSource, /approval_required/);
   assert.match(runnerSource, /CODE_EXECUTION_RUNNER_TOKEN/);
   assert.match(runnerSource, /DAYTONA_API_KEY/);
+  assert.match(runnerSource, /DAYTONA_MOCK_RESULT/);
+  assert.match(runnerSource, /DAYTONA_PROXY_BASE_URL/);
   assert.match(runnerSource, /proxy\.app\.daytona\.io/);
   assert.match(runnerSource, /\/process\/code-run/);
   assert.match(runnerSource, /\/process\/execute/);

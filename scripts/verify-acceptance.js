@@ -3503,6 +3503,8 @@ function verifySupabaseIntegrationSources() {
   );
   assert.match(codeRunnerSource, /CODE_EXECUTION_RUNNER_TOKEN/);
   assert.match(codeRunnerSource, /DAYTONA_API_KEY/);
+  assert.match(codeRunnerSource, /DAYTONA_MOCK_RESULT/);
+  assert.match(codeRunnerSource, /DAYTONA_PROXY_BASE_URL/);
   assert.match(codeRunnerSource, /proxy\.app\.daytona\.io/);
   assert.match(codeRunnerSource, /\/process\/code-run/);
   assert.match(codeRunnerSource, /\/process\/execute/);
@@ -3640,6 +3642,9 @@ function verifyE2EHarnessSource() {
   assert.match(localLiveSmokeSource, /supabase[\s\S]*functions[\s\S]*serve/);
   assert.match(localLiveSmokeSource, /supabase[\s\S]*migration[\s\S]*up/);
   assert.match(localLiveSmokeSource, /verify-live-integrations\.js/);
+  assert.match(localLiveSmokeSource, /DAYTONA_MOCK_RESULT/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);
+  assert.match(localLiveSmokeSource, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
   assert.match(localLiveSmokeSource, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
   assert.match(localLiveSmokeSource, /STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN/);
   assert.match(liveSmokeSource, /verifyStatusRead/);
