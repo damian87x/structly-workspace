@@ -107,6 +107,9 @@ function verifyStaticE2EContracts() {
   );
   assert.match(capabilitySource, /Schedule Jobs/);
   assert.match(capabilitySource, /Code Runs/);
+  assert.match(appSource, /functionName: "location-suggestions"/);
+  assert.match(appSource, /createMobileLocationSuggestionPayload/);
+  assert.match(appSource, /findLocationTrigger/);
   assert.doesNotMatch(appSource, /DAYTONA|COMPOSIO|SERVICE_ROLE|MCP_API_KEY/);
   assert.doesNotMatch(envExample, /DAYTONA|COMPOSIO|SERVICE_ROLE|MCP_API_KEY/);
   assert.match(migration, /create table if not exists public\.schedule_jobs/);

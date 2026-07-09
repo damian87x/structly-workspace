@@ -37,7 +37,11 @@ import { buildReviewReceipt } from "./src/lib/reviewReceipt";
 import { applyCorrection } from "./src/lib/reviewQueue";
 import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
-import { createMobileDeviceHeartbeatPayload } from "./src/lib/mobileIntegrationRuntime";
+import {
+  createMobileDeviceHeartbeatPayload,
+  createMobileLocationSuggestionPayload,
+  findLocationTrigger,
+} from "./src/lib/mobileIntegrationRuntime";
 import {
   TRIGGER_RUN_STATUS,
   createRunApprovalPayload,
@@ -241,6 +245,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [isExporting, setIsExporting] = useState(false);
   const [isRunActionRunning, setIsRunActionRunning] = useState(false);
   const [isTriggerActionRunning, setIsTriggerActionRunning] = useState(false);
+  const [locationSuggestionMessage, setLocationSuggestionMessage] = useState(null);
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
@@ -466,6 +471,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setLocationSuggestionMessage(null);
     setReviewedReceipts([]);
     setSelectingSource(source);
 
@@ -496,6 +502,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setLocationSuggestionMessage(null);
     setReceipt(null);
     setReviewedReceipts([]);
   }
@@ -509,15 +516,39 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setLocationSuggestionMessage(null);
     setReviewedReceipts([]);
     setIsExtracting(true);
 
     try {
       const result = await confirmReceiptExtraction(receipt, { vision });
       const receiptForReview = buildReviewReceipt(result.receipt, receipt);
+      const locationSuggestionPayload = createMobileLocationSuggestionPayload({
+        locationTrigger: findLocationTrigger(integrationSync.triggerDefinitions),
+        platform: Platform.OS,
+        receipt: receiptForReview,
+        session,
+        userId: email,
+      });
 
       setReviewedReceipts([receiptForReview]);
       setConfirmedReceipt(true);
+      if (locationSuggestionPayload) {
+        void callIntegrationFunction({
+          anonKey,
+          body: locationSuggestionPayload,
+          config: backendConfig,
+          functionName: "location-suggestions",
+          session,
+        })
+          .then(({ error }) => {
+            if (!error) {
+              setLocationSuggestionMessage("Location suggestion queued.");
+              void refreshSyncedTriggers();
+            }
+          })
+          .catch(() => {});
+      }
       void enrichReceipt(receiptForReview)
         .then((enrichedReceipt) => {
           setReviewedReceipts((currentRows) =>
@@ -762,6 +793,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           <Text style={styles.panelMeta}>
             Trigger list: {integrationDashboard.triggerListState}
           </Text>
+          {locationSuggestionMessage ? (
+            <Text style={styles.panelMeta}>{locationSuggestionMessage}</Text>
+          ) : null}
           <Text style={styles.panelMeta}>Catalog source: backend</Text>
           {integrationDashboard.triggers.map((trigger) => (
             <View key={trigger.id} style={styles.triggerRow}>

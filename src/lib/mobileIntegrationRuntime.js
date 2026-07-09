@@ -1,3 +1,5 @@
+const { LOCATION_EVENT_TYPE, createCoarseLocation } = require("./locationEvents");
+
 function getSessionUserId(session, fallbackUserId) {
   return session?.user?.id || fallbackUserId || session?.user?.email || null;
 }
@@ -32,8 +34,68 @@ function createMobileDeviceHeartbeatPayload({
   };
 }
 
+function findLocationTrigger(triggers = []) {
+  if (!Array.isArray(triggers)) {
+    return null;
+  }
+
+  return (
+    triggers.find((trigger) => {
+      const source = typeof trigger?.source === "string" ? trigger.source : "";
+      const status = trigger?.status || "active";
+
+      return source.startsWith("location:") && status === "active";
+    }) || null
+  );
+}
+
+function getReceiptLocation(receipt) {
+  const context = receipt?.context || {};
+  const location = context.location;
+
+  return location && typeof location === "object" ? location : null;
+}
+
+function createMobileLocationSuggestionPayload({
+  locationTrigger,
+  platform = "unknown",
+  receipt,
+  session,
+  userId,
+} = {}) {
+  const location = getReceiptLocation(receipt);
+  const coarseLocation = createCoarseLocation(location);
+  const resolvedUserId = getSessionUserId(session, userId);
+
+  if (!locationTrigger?.id || !coarseLocation || !resolvedUserId) {
+    return null;
+  }
+
+  const placeLabel = location.placeName || location.city || null;
+
+  return {
+    coords: {
+      latitude: coarseLocation.latitude,
+      longitude: coarseLocation.longitude,
+    },
+    deviceId: createMobileDeviceId({ platform, userId: resolvedUserId }),
+    eventType: LOCATION_EVENT_TYPE.VISIT,
+    observedAt:
+      receipt?.capturedAt ||
+      receipt?.context?.capturedAt ||
+      new Date().toISOString(),
+    placeId: placeLabel || "receipt-capture",
+    placeLabel,
+    receiptCount: 1,
+    triggerId: locationTrigger.id,
+    userId: resolvedUserId,
+  };
+}
+
 module.exports = {
   createMobileDeviceHeartbeatPayload,
   createMobileDeviceId,
+  createMobileLocationSuggestionPayload,
+  findLocationTrigger,
   getSessionUserId,
 };

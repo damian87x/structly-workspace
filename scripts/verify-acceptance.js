@@ -99,6 +99,8 @@ const {
 const {
   createMobileDeviceHeartbeatPayload,
   createMobileDeviceId,
+  createMobileLocationSuggestionPayload,
+  findLocationTrigger,
   getSessionUserId,
 } = require("../src/lib/mobileIntegrationRuntime");
 const {
@@ -2352,6 +2354,7 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /Composio and MCP are backend adapters/);
   assert.match(roadmap, /Schedules, Location Suggestions, And Code Runs/);
   assert.match(roadmap, /Daytona-style code execution/);
+  assert.match(roadmap, /coarse-only location suggestion from mobile/);
   assert.match(roadmap, /foreground\/resume device heartbeats/);
   assert.match(roadmap, /user-scoped mobile sync/);
   assert.match(roadmap, /trigger create\/edit\/pause\/resume\/delete/);
@@ -2543,6 +2546,56 @@ function verifyHeartbeatClassificationModule() {
       platform: "android",
       userId: "user-1",
     },
+  );
+  const locationTrigger = findLocationTrigger([
+    { id: "trigger-schedule", source: "schedule", status: "active" },
+    { id: "trigger-location", source: "location:coarse", status: "active" },
+  ]);
+  const locationSuggestionPayload = createMobileLocationSuggestionPayload({
+    locationTrigger,
+    platform: "android",
+    receipt: {
+      capturedAt: "2026-07-09T12:00:00.000Z",
+      context: {
+        location: {
+          latitude: 51.507351,
+          longitude: -0.127758,
+          placeName: "Soho Market",
+        },
+      },
+    },
+    session: { user: { id: "user-1" } },
+  });
+
+  assert.equal(locationTrigger.id, "trigger-location");
+  assert.deepEqual(locationSuggestionPayload, {
+    coords: {
+      latitude: 51.51,
+      longitude: -0.13,
+    },
+    deviceId: "structly:android:user-1",
+    eventType: LOCATION_EVENT_TYPE.VISIT,
+    observedAt: "2026-07-09T12:00:00.000Z",
+    placeId: "Soho Market",
+    placeLabel: "Soho Market",
+    receiptCount: 1,
+    triggerId: "trigger-location",
+    userId: "user-1",
+  });
+  assert.equal(
+    createMobileLocationSuggestionPayload({
+      locationTrigger,
+      receipt: {
+        context: {
+          location: {
+            latitude: null,
+            longitude: -0.127758,
+          },
+        },
+      },
+      session: { user: { id: "user-1" } },
+    }),
+    null,
   );
 }
 
@@ -3416,6 +3469,7 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /callIntegrationFunction/);
   assert.match(appSource, /functionName: "status-read"/);
   assert.match(appSource, /functionName: "heartbeat-ingest"/);
+  assert.match(appSource, /functionName: "location-suggestions"/);
   assert.match(appSource, /functionName: "mobile-sync"/);
   assert.match(appSource, /functionName: "run-actions"/);
   assert.match(appSource, /functionName: "trigger-actions"/);
@@ -3425,7 +3479,10 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /Approve/);
   assert.match(appSource, /Deny/);
   assert.match(appSource, /createMobileDeviceHeartbeatPayload/);
+  assert.match(appSource, /createMobileLocationSuggestionPayload/);
+  assert.match(appSource, /findLocationTrigger/);
   assert.match(appSource, /shouldSendHeartbeat/);
+  assert.match(appSource, /Location suggestion queued/);
   assert.match(appSource, /handleTriggerAction/);
   assert.match(appSource, /createTriggerPayload/);
   assert.match(appSource, /pauseTriggerPayload/);
