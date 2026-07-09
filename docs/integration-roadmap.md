@@ -3,6 +3,7 @@
 Structly's current MVP remains a receipt capture, review, enrichment, and export app. The MVP does not require OAuth connectors, third-party action execution, or model/tool code execution on the device.
 
 This roadmap defines the gated path for backend-owned integrations after the MVP path remains green.
+The concrete post-MVP mobile work is broken into epics in `docs/mobile-integration-epics.md`.
 
 ## Phase 0 - Protect The MVP
 

@@ -2343,6 +2343,7 @@ async function verifyEnrichReceiptModule() {
 
 function verifyIntegrationRoadmap() {
   const roadmap = fs.readFileSync("docs/integration-roadmap.md", "utf8");
+  const epics = fs.readFileSync("docs/mobile-integration-epics.md", "utf8");
   const pixelPlan = fs.readFileSync("docs/android-pixel-test-plan.md", "utf8");
 
   assert.match(roadmap, /current MVP remains/);
@@ -2366,6 +2367,23 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /approve or deny approval-required trigger runs/);
   assert.match(roadmap, /npm run test:e2e/);
   assert.match(roadmap, /Mobile bundle\/env audit/);
+  assert.match(epics, /post-MVP integration path/);
+  assert.match(epics, /Mobile Health And Sync/);
+  assert.match(epics, /Trigger Management And Approvals/);
+  assert.match(epics, /Scheduled Jobs And Recurring Packs/);
+  assert.match(epics, /Location Suggestions/);
+  assert.match(epics, /Composio Trigger Ingestion/);
+  assert.match(epics, /MCP Approved Tools/);
+  assert.match(epics, /Daytona Code Execution/);
+  assert.match(epics, /Pixel Release Gate/);
+  assert.match(epics, /webhook-signature/);
+  assert.match(epics, /tools\/list/);
+  assert.match(epics, /tools\/call/);
+  assert.match(epics, /killed-app/);
+  assert.match(epics, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(epics, /STRUCTLY_TEST_MCP_SERVER_ID/);
+  assert.match(epics, /STRUCTLY_TEST_DAYTONA_SANDBOX_ID/);
+  assert.match(epics, /npm run test:pixel/);
   assert.match(pixelPlan, /Pixel device/);
   assert.match(pixelPlan, /Killed-app behavior is recorded instead of assumed/);
   assert.match(pixelPlan, /coarse coordinates/);
