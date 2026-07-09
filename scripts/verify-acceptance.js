@@ -3298,7 +3298,12 @@ function verifyE2EHarnessSource() {
     "scripts/verify-edge-functions.js",
     "utf8",
   );
+  const liveSmokeSource = fs.readFileSync(
+    "scripts/verify-live-integrations.js",
+    "utf8",
+  );
   const ciDocs = fs.readFileSync("docs/mobile-integration-ci.md", "utf8");
+  const liveSmokeDocs = fs.readFileSync("docs/live-integration-smoke.md", "utf8");
   const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
   assert.equal(pkg.scripts["test:ci"], "npm run test:all");
@@ -3306,6 +3311,7 @@ function verifyE2EHarnessSource() {
     pkg.scripts["test:e2e"],
     "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
   );
+  assert.equal(pkg.scripts["test:live"], "node scripts/verify-live-integrations.js");
   assert.equal(
     pkg.scripts["test:all"],
     "npm test && npm run audit:oauth && npm run test:e2e",
@@ -3321,10 +3327,19 @@ function verifyE2EHarnessSource() {
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
+  assert.match(liveSmokeSource, /STRUCTLY_FUNCTIONS_URL/);
+  assert.match(liveSmokeSource, /verifyStatusRead/);
+  assert.match(liveSmokeSource, /verifyLocationSuggestion/);
+  assert.match(liveSmokeSource, /verifyCodeExecution/);
+  assert.match(liveSmokeSource, /verifyScheduleJob/);
+  assert.match(liveSmokeSource, /--require-live/);
   assert.match(ciDocs, /npm run test:ci/);
   assert.match(ciDocs, /actions\/checkout@v5/);
   assert.match(ciDocs, /actions\/setup-node@v6/);
   assert.match(ciDocs, /workflow` scope/);
+  assert.match(liveSmokeDocs, /npm run test:live/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_USER_TOKEN/);
+  assert.match(liveSmokeDocs, /STRUCTLY_TEST_SCHEDULE_TOKEN/);
 }
 
 async function main() {

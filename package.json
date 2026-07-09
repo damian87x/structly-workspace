@@ -11,6 +11,7 @@
     "test": "node scripts/verify-acceptance.js",
     "test:ci": "npm run test:all",
     "test:e2e": "node scripts/verify-e2e.js && node scripts/verify-edge-functions.js",
+    "test:live": "node scripts/verify-live-integrations.js",
     "test:all": "npm test && npm run audit:oauth && npm run test:e2e",
     "audit:oauth": "node scripts/check-no-google-oauth.js"
   },
