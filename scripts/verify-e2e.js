@@ -477,8 +477,12 @@ function verifyBackendFunctionSources() {
   assert.match(runnerSource, /\/process\/code-run/);
   assert.match(runnerSource, /\/process\/execute/);
   assert.match(runnerSource, /code_execution_requests/);
-  assert.match(read("supabase/functions/composio-webhook/index.ts"), /COMPOSIO_WEBHOOK_SECRET/);
-  assert.match(read("supabase/functions/composio-webhook/index.ts"), /trigger_runs/);
+  const composioSource = read("supabase/functions/composio-webhook/index.ts");
+
+  assert.match(composioSource, /COMPOSIO_WEBHOOK_SECRET/);
+  assert.match(composioSource, /invalid_signature/);
+  assert.match(composioSource, /trigger_runs/);
+  assert.doesNotMatch(composioSource, /if \(!secret\)[\s\S]*return true/);
   assert.match(edgeHarnessSource, /verifyComposioWebhookFunction/);
   assert.match(statusSource, /auth\/v1\/user/);
   assert.match(statusSource, /user_id=eq\.\$\{userFilter\}/);

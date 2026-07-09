@@ -41,7 +41,7 @@ Composio webhook:
 ```sh
 STRUCTLY_TEST_COMPOSIO_TRIGGER_ID="structly-trigger-definition-id"
 STRUCTLY_TEST_COMPOSIO_USER_ID="user-id"
-STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET="composio-webhook-secret-if-configured"
+STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET="composio-webhook-secret"
 ```
 
 Schedule worker:

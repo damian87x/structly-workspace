@@ -2902,6 +2902,7 @@ function verifyComposioWebhookBackendOnlySource() {
   assert.match(functionSource, /trigger_runs/);
   assert.match(functionSource, /invalid_signature/);
   assert.match(functionSource, /eventKey/);
+  assert.doesNotMatch(functionSource, /if \(!secret\)[\s\S]*return true/);
   assert.doesNotMatch(appSource, /COMPOSIO|service_role|composio-webhook/i);
   assert.doesNotMatch(envExample, /EXPO_PUBLIC_COMPOSIO|SERVICE_ROLE/i);
 }
@@ -3611,6 +3612,7 @@ function verifyE2EHarnessSource() {
   assert.match(liveSmokeSource, /verifyCodeExecution/);
   assert.match(liveSmokeSource, /verifyDaytonaExecution/);
   assert.match(liveSmokeSource, /verifyComposioWebhook/);
+  assert.match(liveSmokeSource, /STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET/);
   assert.match(liveSmokeSource, /verifyScheduleJob/);
   assert.match(liveSmokeSource, /verifyMcpBridge/);
   assert.match(liveSmokeSource, /STRUCTLY_TEST_CODE_RUNNER_TOKEN/);

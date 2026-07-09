@@ -21,6 +21,7 @@ const DAYTONA_ENV = [
 const COMPOSIO_ENV = [
   "STRUCTLY_TEST_COMPOSIO_TRIGGER_ID",
   "STRUCTLY_TEST_COMPOSIO_USER_ID",
+  "STRUCTLY_TEST_COMPOSIO_WEBHOOK_SECRET",
 ];
 const MCP_ENV = ["STRUCTLY_TEST_MCP_SERVER_ID"];
 const WORKER_HEARTBEAT_ENV = ["STRUCTLY_TEST_WORKER_HEARTBEAT_TOKEN"];
@@ -265,14 +266,12 @@ async function verifyComposioWebhook(config) {
     type: "composio.trigger.message",
   };
   const body = JSON.stringify(payload);
-  const signature = config.composioWebhookSecret
-    ? signComposioPayload({
-        body,
-        secret: config.composioWebhookSecret,
-        timestamp,
-        webhookId,
-      })
-    : "live-smoke-signature";
+  const signature = signComposioPayload({
+    body,
+    secret: config.composioWebhookSecret,
+    timestamp,
+    webhookId,
+  });
   const result = await callFunction({
     config,
     functionName: "composio-webhook",

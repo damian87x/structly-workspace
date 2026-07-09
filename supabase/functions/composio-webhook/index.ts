@@ -96,12 +96,8 @@ async function verifyWebhookSignature(request, rawBody) {
   const timestamp = getReplayTimestamp(request);
   const secret = Deno.env.get("COMPOSIO_WEBHOOK_SECRET");
 
-  if (!signature || !timestamp || !timestampIsFresh(timestamp)) {
+  if (!secret || !signature || !timestamp || !timestampIsFresh(timestamp)) {
     return false;
-  }
-
-  if (!secret) {
-    return true;
   }
 
   const webhookId = getWebhookId(request);

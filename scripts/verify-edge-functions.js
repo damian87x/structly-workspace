@@ -1134,6 +1134,47 @@ async function verifyComposioWebhookFunction() {
   const body = JSON.stringify(payload);
   const timestamp = String(Math.floor(Date.now() / 1000));
   const webhookId = "webhook-message-1";
+  const missingSecretHandler = loadEdgeHandler(
+    "supabase/functions/composio-webhook/index.ts",
+    {
+      env: {
+        ...DEFAULT_ENV,
+        COMPOSIO_WEBHOOK_SECRET: "",
+      },
+      fetchImpl: async (url, options = {}) => {
+        calls.push({
+          body: parseBody(options),
+          method: options.method || "GET",
+          url: String(url),
+        });
+        return jsonResponse([]);
+      },
+    },
+  );
+  const missingSecret = await readJson(
+    await missingSecretHandler(
+      new Request("https://edge.example.test", {
+        body,
+        headers: {
+          "Content-Type": "application/json",
+          "webhook-id": webhookId,
+          "webhook-signature": signComposioPayload({
+            body,
+            secret,
+            timestamp,
+            webhookId,
+          }),
+          "webhook-timestamp": timestamp,
+        },
+        method: "POST",
+      }),
+    ),
+  );
+
+  assert.equal(missingSecret.status, 401);
+  assert.equal(missingSecret.data.error, "invalid_signature");
+  assert.equal(calls.length, 0);
+
   const invalid = await readJson(
     await handler(
       new Request("https://edge.example.test", {
