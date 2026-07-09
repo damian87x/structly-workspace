@@ -51,6 +51,22 @@ function getEventsCalendar(events) {
   };
 }
 
+function getCoordinate(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getLocationCoordinates(receipt) {
+  const location = getReceiptContext(receipt).location;
+  const latitude = getCoordinate(location?.latitude);
+  const longitude = getCoordinate(location?.longitude);
+
+  if (latitude === null || longitude === null) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
 function resolveSafely(operation, fallback) {
   return new Promise((resolve) => {
     let settled = false;
@@ -84,9 +100,19 @@ async function enrichReceipt(receipt, { location, calendar, events } = {}) {
   }
 
   const capturedAt = getCapturedAt(receipt);
+  const capturedLocationCoords = getLocationCoordinates(receipt);
   const calendarProvider = getEventsCalendar(events) || calendar;
   const [locationContext, calendarContext] = await Promise.all([
-    resolveSafely(() => getReceiptLocation({ location }), null),
+    resolveSafely(
+      () =>
+        capturedLocationCoords
+          ? getReceiptLocation({
+              coords: capturedLocationCoords,
+              location,
+            })
+          : null,
+      null,
+    ),
     resolveSafely(
       () =>
         capturedAt

@@ -10,6 +10,7 @@ const {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
+const { buildReviewReceipt } = require("../src/lib/reviewReceipt");
 const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
 const {
   RECEIPT_FIELD_ROWS,
@@ -118,6 +119,10 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /setSession\(nextSession\)/);
   assert.match(appSource, /takeReceiptPhoto/);
   assert.match(appSource, /pickReceiptFromLibrary/);
+  assert.match(
+    appSource,
+    /handleReceiptSelection\(\(\) => takeReceiptPhoto\(\), "camera"\)/,
+  );
   assert.match(appSource, /Take photo/);
   assert.match(appSource, /Pick from library/);
   assert.match(appSource, /Use this receipt/);
@@ -126,6 +131,9 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /buildReceiptSheet/);
   assert.match(appSource, /confirmReceiptExtraction/);
   assert.match(appSource, /confirmReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/);
+  assert.ok(
+    appSource.includes('import { buildReviewReceipt } from "./src/lib/reviewReceipt";'),
+  );
   assert.ok(
     appSource.includes('import { enrichReceipt } from "./src/lib/enrichReceipt";'),
   );
@@ -181,6 +189,25 @@ function verifyScaffoldFiles() {
   const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
   assert.ok(pkg.dependencies.expo);
   assert.ok(pkg.dependencies["expo-image-picker"]);
+  assert.ok(pkg.dependencies["expo-location"]);
+  assert.ok(pkg.dependencies["expo-calendar"]);
+
+  const appConfig = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+  const findPluginConfig = (name) => {
+    const entry = appConfig.plugins.find(
+      (plugin) => Array.isArray(plugin) && plugin[0] === name,
+    );
+
+    return entry?.[1] || {};
+  };
+  assert.match(
+    findPluginConfig("expo-location").locationWhenInUsePermission,
+    /while capturing a receipt/,
+  );
+  assert.match(
+    findPluginConfig("expo-calendar").calendarPermission,
+    /full calendar access/,
+  );
 
   const dependencies = {
     ...pkg.dependencies,
@@ -247,20 +274,47 @@ async function verifyReceiptCaptureModule() {
       return { status: "granted" };
     },
   };
+  const location = {
+    async getCurrentPositionAsync(options) {
+      calls.push(["getCapturePosition", options]);
+
+      return {
+        coords: {
+          latitude: 51.5074,
+          longitude: -0.1278,
+        },
+      };
+    },
+    async requestForegroundPermissionsAsync() {
+      calls.push(["requestLocation"]);
+      return { status: "granted" };
+    },
+  };
 
   const cameraResult = await takeReceiptPhoto({
     imagePicker,
+    location,
     now: () => cameraCapturedAt,
   });
   assert.equal(cameraResult.error, null);
   assert.equal(cameraResult.status, "selected");
   assert.equal(cameraResult.receipt.capturedAt, cameraCapturedAt);
+  assert.deepEqual(cameraResult.receipt.context.location, {
+    latitude: 51.5074,
+    longitude: -0.1278,
+    placeName: null,
+    city: null,
+    region: null,
+    country: null,
+  });
   assert.equal(cameraResult.receipt.source, "camera");
   assert.equal(cameraResult.receipt.uri, "file://receipt-camera.jpg");
   assert.equal(calls[0][0], "requestCamera");
   assert.equal(calls[1][0], "launchCamera");
   assert.equal(calls[1][1].mediaTypes, "Images");
   assert.equal(calls[1][1].quality, 0.9);
+  assert.deepEqual(calls[2], ["requestLocation"]);
+  assert.deepEqual(calls[3], ["getCapturePosition", {}]);
 
   const libraryResult = await pickReceiptFromLibrary({ imagePicker });
   assert.equal(libraryResult.error, null);
@@ -268,10 +322,10 @@ async function verifyReceiptCaptureModule() {
   assert.equal(libraryResult.receipt.capturedAt, libraryCreationTime);
   assert.equal(libraryResult.receipt.source, "library");
   assert.equal(libraryResult.receipt.uri, "file://receipt-library.png");
-  assert.deepEqual(calls[2], ["requestLibrary", false]);
-  assert.equal(calls[3][0], "launchLibrary");
-  assert.equal(calls[3][1].mediaTypes, "Images");
-  assert.equal(calls[3][1].quality, 0.9);
+  assert.deepEqual(calls[4], ["requestLibrary", false]);
+  assert.equal(calls[5][0], "launchLibrary");
+  assert.equal(calls[5][1].mediaTypes, "Images");
+  assert.equal(calls[5][1].quality, 0.9);
 
   const libraryWithoutCreationTimeResult = await pickReceiptFromLibrary({
     imagePicker: {
@@ -1373,6 +1427,91 @@ function verifyReceiptContextReviewHelper() {
   );
 }
 
+async function verifyReviewReceiptBuilder() {
+  await withNetworkBlocked(async () => {
+    const capturedLocation = {
+      latitude: 51.5074,
+      longitude: -0.1278,
+      placeName: null,
+      city: null,
+      region: null,
+      country: null,
+    };
+    const reviewedCameraReceipt = buildReviewReceipt(
+      {
+        fields: { gross: 24, vendor: "Acme Cafe" },
+        validation: { issues: [], needsReview: false },
+      },
+      {
+        capturedAt: "2026-07-08T10:30:00.000Z",
+        context: { location: capturedLocation },
+        source: "camera",
+        uri: "file://receipt-camera.jpg",
+      },
+    );
+
+    assert.deepEqual(reviewedCameraReceipt.context.location, capturedLocation);
+    assert.equal(reviewedCameraReceipt.context.context, undefined);
+    assert.equal(reviewedCameraReceipt.capturedAt, "2026-07-08T10:30:00.000Z");
+    assert.equal(reviewedCameraReceipt.context.capturedAt, "2026-07-08T10:30:00.000Z");
+
+    const locationCalls = [];
+    const enrichedCameraReceipt = await enrichReceipt(reviewedCameraReceipt, {
+      events: [],
+      location: {
+        async getCurrentPositionAsync() {
+          locationCalls.push(["getCurrentPosition"]);
+          return { coords: { latitude: 0, longitude: 0 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          locationCalls.push(["requestForegroundPermissions"]);
+          return { granted: false };
+        },
+        async reverseGeocodeAsync(coords) {
+          locationCalls.push(["reverseGeocode", coords]);
+
+          return [
+            {
+              city: "London",
+              country: "United Kingdom",
+              name: "Acme Cafe",
+              region: "England",
+            },
+          ];
+        },
+      },
+    });
+
+    assert.deepEqual(locationCalls, [
+      ["reverseGeocode", { latitude: 51.5074, longitude: -0.1278 }],
+    ]);
+    assert.deepEqual(enrichedCameraReceipt.context.location, {
+      latitude: 51.5074,
+      longitude: -0.1278,
+      placeName: "Acme Cafe",
+      city: "London",
+      region: "England",
+      country: "United Kingdom",
+    });
+
+    const reviewedLibraryReceipt = buildReviewReceipt(
+      {
+        fields: { gross: 12, vendor: "Library Cafe" },
+        validation: { issues: [], needsReview: false },
+      },
+      {
+        capturedAt: null,
+        source: "library",
+        uri: "file://receipt-library-no-created-at.png",
+      },
+    );
+
+    assert.equal(reviewedLibraryReceipt.capturedAt, null);
+    assert.equal(reviewedLibraryReceipt.context.capturedAt, null);
+    assert.equal(reviewedLibraryReceipt.source, "library");
+  });
+}
+
 async function verifyReceiptPipelineModule() {
   await withNetworkBlocked(async () => {
     const images = [
@@ -1571,6 +1710,72 @@ async function verifyLocationContextModule() {
       city: null,
       region: null,
       country: null,
+    });
+    const thrownGeocodeContext = await getReceiptLocation({
+      location: {
+        async getCurrentPositionAsync() {
+          return {
+            coords: {
+              latitude: 48.8566,
+              longitude: 2.3522,
+            },
+          };
+        },
+        async requestForegroundPermissionsAsync() {
+          return { granted: true };
+        },
+        async reverseGeocodeAsync() {
+          throw new Error("Geocoder unavailable.");
+        },
+      },
+    });
+    assert.deepEqual(thrownGeocodeContext, {
+      latitude: 48.8566,
+      longitude: 2.3522,
+      placeName: null,
+      city: null,
+      region: null,
+      country: null,
+    });
+    const capturedCoordinateCalls = [];
+    const capturedCoordinateContext = await getReceiptLocation({
+      coords: {
+        latitude: 34.0522,
+        longitude: -118.2437,
+      },
+      location: {
+        async getCurrentPositionAsync() {
+          capturedCoordinateCalls.push(["getCurrentPosition"]);
+          return { coords: { latitude: 0, longitude: 0 } };
+        },
+        async requestForegroundPermissionsAsync() {
+          capturedCoordinateCalls.push(["requestForegroundPermissions"]);
+          return { granted: false };
+        },
+        async reverseGeocodeAsync(coords) {
+          capturedCoordinateCalls.push(["reverseGeocode", coords]);
+
+          return [
+            {
+              city: "Los Angeles",
+              country: "United States",
+              name: "Client Studio",
+              region: "California",
+            },
+          ];
+        },
+      },
+    });
+    assert.deepEqual(capturedCoordinateCalls, [
+      ["reverseGeocode", { latitude: 34.0522, longitude: -118.2437 }],
+    ]);
+    assert.deepEqual(capturedCoordinateContext, {
+      latitude: 34.0522,
+      longitude: -118.2437,
+      placeName: "Client Studio",
+      city: "Los Angeles",
+      region: "California",
+      country: "United States",
     });
 
     const receipt = {
@@ -1783,6 +1988,16 @@ async function verifyEnrichReceiptModule() {
     };
     const receipt = {
       capturedAt,
+      context: {
+        location: {
+          latitude: 51.5074,
+          longitude: -0.1278,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
       fields: { gross: 24, vendor: "Acme Cafe" },
       source: "camera",
       validation: { issues: [], needsReview: false },
@@ -1824,8 +2039,6 @@ async function verifyEnrichReceiptModule() {
     assert.notEqual(enrichedReceipt, receipt);
     assert.deepEqual(receipt, originalSnapshot);
     assert.deepEqual(locationCalls, [
-      ["requestForegroundPermissions"],
-      ["getCurrentPosition", {}],
       ["reverseGeocode", { latitude: 51.5074, longitude: -0.1278 }],
     ]);
     assert.deepEqual(enrichedReceipt.context.location, {
@@ -2041,6 +2254,7 @@ async function main() {
   await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();
   verifyReceiptContextReviewHelper();
+  await verifyReviewReceiptBuilder();
   await verifyReceiptPipelineModule();
   await verifyLocationContextModule();
   await verifyCalendarContextModule();

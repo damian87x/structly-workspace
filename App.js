@@ -27,6 +27,7 @@ import {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } from "./src/lib/receiptCapture";
+import { buildReviewReceipt } from "./src/lib/reviewReceipt";
 import { applyCorrection } from "./src/lib/reviewQueue";
 import {
   CONTEXT_REVIEW_DECISIONS,
@@ -43,29 +44,6 @@ function formatFieldValue(value) {
   }
 
   return String(value);
-}
-
-function getContext(context) {
-  return context && typeof context === "object" && !Array.isArray(context)
-    ? context
-    : {};
-}
-
-function buildReviewReceipt(extractedReceipt, sourceReceipt) {
-  const capturedAt = sourceReceipt.capturedAt || new Date().toISOString();
-  const source = sourceReceipt.source || null;
-
-  return {
-    ...extractedReceipt,
-    capturedAt,
-    source,
-    sourceUri: sourceReceipt.uri || null,
-    context: {
-      ...getContext(extractedReceipt.context),
-      capturedAt,
-      source,
-    },
-  };
 }
 
 function isSameReviewedReceipt(currentReceipt, expectedReceipt) {
@@ -607,7 +585,9 @@ function CaptureScreen({ email, vision }) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(selectingSource) }}
                 disabled={Boolean(selectingSource)}
-                onPress={() => handleReceiptSelection(takeReceiptPhoto, "camera")}
+                onPress={() =>
+                  handleReceiptSelection(() => takeReceiptPhoto(), "camera")
+                }
                 style={({ pressed }) => [
                   styles.button,
                   styles.actionButton,

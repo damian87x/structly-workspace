@@ -19,6 +19,17 @@ function getCoordinate(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function getCoordinates(coords) {
+  const latitude = getCoordinate(coords?.latitude);
+  const longitude = getCoordinate(coords?.longitude);
+
+  if (latitude === null || longitude === null) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
 function getPlaceName(address) {
   return (
     normalizeText(address?.name) ||
@@ -50,9 +61,41 @@ function hasLocationProvider(location) {
   );
 }
 
-async function getReceiptLocation({ location } = {}) {
+async function getReverseGeocodedLocation(provider, latitude, longitude) {
+  let addresses = [];
+
   try {
+    addresses = await provider.reverseGeocodeAsync({
+      latitude,
+      longitude,
+    });
+  } catch (error) {
+    addresses = [];
+  }
+
+  return normalizeLocation(latitude, longitude, addresses);
+}
+
+async function getReceiptLocation({ location, coords } = {}) {
+  try {
+    const capturedCoords = getCoordinates(coords);
     const provider = location || getDefaultLocation();
+
+    if (capturedCoords) {
+      if (!provider || typeof provider.reverseGeocodeAsync !== "function") {
+        return normalizeLocation(
+          capturedCoords.latitude,
+          capturedCoords.longitude,
+          [],
+        );
+      }
+
+      return getReverseGeocodedLocation(
+        provider,
+        capturedCoords.latitude,
+        capturedCoords.longitude,
+      );
+    }
 
     if (!hasLocationProvider(provider)) {
       return null;
@@ -72,12 +115,7 @@ async function getReceiptLocation({ location } = {}) {
       return null;
     }
 
-    const addresses = await provider.reverseGeocodeAsync({
-      latitude,
-      longitude,
-    });
-
-    return normalizeLocation(latitude, longitude, addresses);
+    return getReverseGeocodedLocation(provider, latitude, longitude);
   } catch (error) {
     return null;
   }

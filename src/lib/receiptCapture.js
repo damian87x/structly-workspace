@@ -4,6 +4,10 @@ function getDefaultImagePicker() {
   return require("expo-image-picker");
 }
 
+function getDefaultLocation() {
+  return require("expo-location");
+}
+
 function hasPermission(permission) {
   return permission?.granted === true || permission?.status === "granted";
 }
@@ -17,12 +21,62 @@ function getImageOptions(imagePicker) {
   };
 }
 
-function normalizeReceipt(asset, source, capturedAt) {
-  if (!asset?.uri) {
+function getCoordinate(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeCapturedLocation(position) {
+  const latitude = getCoordinate(position?.coords?.latitude);
+  const longitude = getCoordinate(position?.coords?.longitude);
+
+  if (latitude === null || longitude === null) {
     return null;
   }
 
   return {
+    latitude,
+    longitude,
+    placeName: null,
+    city: null,
+    region: null,
+    country: null,
+  };
+}
+
+function hasLocationCaptureProvider(location) {
+  return (
+    location &&
+    typeof location.requestForegroundPermissionsAsync === "function" &&
+    typeof location.getCurrentPositionAsync === "function"
+  );
+}
+
+async function getCapturedLocation(location) {
+  try {
+    if (!hasLocationCaptureProvider(location)) {
+      return null;
+    }
+
+    const permission = await location.requestForegroundPermissionsAsync();
+
+    if (!hasPermission(permission)) {
+      return null;
+    }
+
+    return normalizeCapturedLocation(
+      await location.getCurrentPositionAsync({}),
+    );
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeReceipt(asset, source, capturedAt, context) {
+  if (!asset?.uri) {
+    return null;
+  }
+
+  const receipt = {
     capturedAt,
     fileName: asset.fileName || null,
     height: asset.height || null,
@@ -31,9 +85,20 @@ function normalizeReceipt(asset, source, capturedAt) {
     uri: asset.uri,
     width: asset.width || null,
   };
+
+  if (context && Object.keys(context).length > 0) {
+    receipt.context = context;
+  }
+
+  return receipt;
 }
 
-function normalizePickerResult(result, source, getCapturedAt = () => null) {
+function normalizePickerResult(
+  result,
+  source,
+  getCapturedAt = () => null,
+  context,
+) {
   if (result?.canceled || result?.cancelled) {
     return { error: null, receipt: null, status: "cancelled" };
   }
@@ -43,6 +108,7 @@ function normalizePickerResult(result, source, getCapturedAt = () => null) {
     asset,
     source,
     asset?.uri ? getCapturedAt(asset) : null,
+    context,
   );
 
   if (!receipt) {
@@ -57,10 +123,18 @@ function normalizePickerResult(result, source, getCapturedAt = () => null) {
 }
 
 async function takeReceiptPhoto({
-  imagePicker = getDefaultImagePicker(),
+  imagePicker,
+  location,
   now = () => new Date().toISOString(),
 } = {}) {
-  const permission = await imagePicker.requestCameraPermissionsAsync();
+  const useDefaultProviders = !imagePicker && location === undefined;
+  const picker = imagePicker || getDefaultImagePicker();
+  const locationProvider = location === undefined
+    ? useDefaultProviders
+      ? getDefaultLocation()
+      : null
+    : location;
+  const permission = await picker.requestCameraPermissionsAsync();
 
   if (!hasPermission(permission)) {
     return {
@@ -70,8 +144,11 @@ async function takeReceiptPhoto({
     };
   }
 
-  const result = await imagePicker.launchCameraAsync(getImageOptions(imagePicker));
-  return normalizePickerResult(result, "camera", () => now());
+  const result = await picker.launchCameraAsync(getImageOptions(picker));
+  const capturedLocation = await getCapturedLocation(locationProvider);
+  const context = capturedLocation ? { location: capturedLocation } : null;
+
+  return normalizePickerResult(result, "camera", () => now(), context);
 }
 
 async function pickReceiptFromLibrary({ imagePicker = getDefaultImagePicker() } = {}) {

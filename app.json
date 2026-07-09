@@ -14,9 +14,15 @@
         }
       ],
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Structly uses your location while capturing a receipt to add the place to that receipt."
+        }
+      ],
+      [
         "expo-calendar",
         {
-          "calendarPermission": "Structly uses your calendar to match receipt times to client meetings."
+          "calendarPermission": "Structly needs full calendar access to match receipt times to client meetings."
         }
       ]
     ],
