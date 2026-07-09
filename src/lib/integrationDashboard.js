@@ -50,6 +50,30 @@ function getTriggerListState({ error, loading, triggers } = {}) {
   return TRIGGER_LIST_STATE.LOADED;
 }
 
+function normalizeTriggerDefinition(trigger = {}) {
+  return createTriggerDefinition({
+    config: trigger.config || {},
+    createdAt: trigger.createdAt || trigger.created_at || new Date().toISOString(),
+    id: trigger.id,
+    name: trigger.name || trigger.trigger_name || "Trigger",
+    source: trigger.source,
+    status: trigger.status || TRIGGER_STATUS.ACTIVE,
+    type: trigger.type || trigger.triggerType || trigger.trigger_type,
+    userId: trigger.userId || trigger.user_id,
+  });
+}
+
+function normalizeTriggerRun(run = {}) {
+  return {
+    ...run,
+    id: run.id,
+    status: run.status,
+    triggerId: run.triggerId || run.trigger_id,
+    updatedAt: run.updatedAt || run.updated_at,
+    userId: run.userId || run.user_id,
+  };
+}
+
 function getDefaultTriggerDashboard(options = {}) {
   const health = getDefaultIntegrationHealth(options);
   const backendReady = health.backend === CAPABILITY_STATUS.AVAILABLE;
@@ -69,7 +93,7 @@ function getDefaultTriggerDashboard(options = {}) {
     type: "receipt_reviewed",
     userId: options.userId || null,
   });
-  const runs = [
+  const fallbackRuns = [
     {
       id: "run-approval-required",
       status: TRIGGER_RUN_STATUS.APPROVAL_REQUIRED,
@@ -96,6 +120,13 @@ function getDefaultTriggerDashboard(options = {}) {
       triggerId: trigger.id,
     },
   ];
+  const syncHydrated = options.syncHydrated === true;
+  const runs = syncHydrated
+    ? (options.runHistory || []).map(normalizeTriggerRun)
+    : fallbackRuns;
+  const triggers = syncHydrated
+    ? (options.triggers || []).map(normalizeTriggerDefinition)
+    : [trigger];
 
   return {
     health,
@@ -108,13 +139,18 @@ function getDefaultTriggerDashboard(options = {}) {
       canPause: provider.status === CAPABILITY_STATUS.AVAILABLE,
       canResume: provider.status === CAPABILITY_STATUS.AVAILABLE,
     },
-    triggerListState: getTriggerListState({ triggers: [trigger] }),
-    triggers: [
-      {
-        ...trigger,
-        displayStatus: getTriggerDisplayStatus(trigger, runs),
-      },
-    ],
+    triggerListState: getTriggerListState({
+      error: options.syncError,
+      loading: options.syncLoading,
+      triggers,
+    }),
+    triggers: triggers.map((nextTrigger) => ({
+      ...nextTrigger,
+      displayStatus: getTriggerDisplayStatus(
+        nextTrigger,
+        runs.filter((run) => run.triggerId === nextTrigger.id),
+      ),
+    })),
   };
 }
 
@@ -123,4 +159,6 @@ module.exports = {
   getDefaultTriggerDashboard,
   getProviderState,
   getTriggerListState,
+  normalizeTriggerDefinition,
+  normalizeTriggerRun,
 };

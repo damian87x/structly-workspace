@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +28,7 @@ import {
 } from "./src/lib/confirmReceiptExtraction";
 import { enrichReceipt } from "./src/lib/enrichReceipt";
 import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
+import { shouldSendHeartbeat } from "./src/lib/heartbeats";
 import {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
@@ -35,6 +37,7 @@ import { buildReviewReceipt } from "./src/lib/reviewReceipt";
 import { applyCorrection } from "./src/lib/reviewQueue";
 import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
+import { createMobileDeviceHeartbeatPayload } from "./src/lib/mobileIntegrationRuntime";
 import {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
@@ -237,6 +240,14 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     schedulerConfigured: false,
     stale: true,
   });
+  const [integrationSync, setIntegrationSync] = useState({
+    error: false,
+    hydrated: false,
+    loading: false,
+    runHistory: [],
+    triggerDefinitions: [],
+  });
+  const lastHeartbeatSentAtRef = useRef(null);
   const receiptSheet = useMemo(
     () => buildReceiptSheet(reviewedReceipts),
     [reviewedReceipts],
@@ -258,10 +269,15 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
         },
         codeExecutionConfigured: backendStatus.codeExecutionConfigured,
         providerConfigured: backendStatus.providerConfigured,
+        runHistory: integrationSync.runHistory,
         schedulerConfigured: backendStatus.schedulerConfigured,
+        syncError: integrationSync.error,
+        syncHydrated: integrationSync.hydrated,
+        syncLoading: integrationSync.loading,
+        triggers: integrationSync.triggerDefinitions,
         userId: email,
       }),
-    [backendStatus, email],
+    [backendStatus, email, integrationSync],
   );
   const integrationHealthRows = getHealthRows(integrationDashboard.health);
   const needsReviewRow = receiptSheet.validation.needsReviewRows[0] || null;
@@ -296,19 +312,64 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
       };
     }
 
-    callIntegrationFunction({
-      anonKey,
-      body: {},
-      config: backendConfig,
-      functionName: "status-read",
-      session,
-    })
-      .then(({ data, error }) => {
+    async function refreshIntegrationState(appState = AppState.currentState || "active") {
+      const now = Date.now();
+      const heartbeatDue = shouldSendHeartbeat({
+        lastSentAt: lastHeartbeatSentAtRef.current,
+        now,
+      });
+      const heartbeatBody = createMobileDeviceHeartbeatPayload({
+        appState,
+        capabilities: {
+          device: Platform.OS === "android" ? "android_phone" : Platform.OS,
+        },
+        platform: Platform.OS,
+        session,
+        userId: email,
+      });
+
+      setIntegrationSync((currentSync) => ({
+        ...currentSync,
+        error: false,
+        loading: true,
+      }));
+
+      try {
+        const [statusResult, syncResult, heartbeatResult] = await Promise.all([
+          callIntegrationFunction({
+            anonKey,
+            body: {},
+            config: backendConfig,
+            functionName: "status-read",
+            session,
+          }),
+          callIntegrationFunction({
+            anonKey,
+            body: {},
+            config: backendConfig,
+            functionName: "mobile-sync",
+            session,
+          }),
+          heartbeatDue
+            ? callIntegrationFunction({
+                anonKey,
+                body: heartbeatBody,
+                config: backendConfig,
+                functionName: "heartbeat-ingest",
+                session,
+              })
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+
         if (!active) {
           return;
         }
 
-        if (error || !data) {
+        if (heartbeatDue && !heartbeatResult.error) {
+          lastHeartbeatSentAtRef.current = now;
+        }
+
+        if (statusResult.error || !statusResult.data) {
           setBackendStatus({
             codeExecutionConfigured: false,
             providerConfigured: false,
@@ -316,35 +377,69 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
             schedulerConfigured: false,
             stale: true,
           });
+        } else {
+          const { data } = statusResult;
+
+          setBackendStatus({
+            codeExecutionConfigured: data.codeExecution === "available",
+            providerConfigured: data.bridge === "available",
+            reachable: data.backend === "available",
+            schedulerConfigured: data.cron === "available",
+            stale:
+              data.workerHeartbeat === "stale" ||
+              data.workerHeartbeat === "failed",
+          });
+        }
+
+        if (syncResult.error || !syncResult.data) {
+          setIntegrationSync((currentSync) => ({
+            ...currentSync,
+            error: true,
+            loading: false,
+          }));
+          return;
+        }
+
+        setIntegrationSync({
+          error: false,
+          hydrated: true,
+          loading: false,
+          runHistory: syncResult.data.runHistory || [],
+          triggerDefinitions: syncResult.data.triggerDefinitions || [],
+        });
+      } catch (error) {
+        if (!active) {
           return;
         }
 
         setBackendStatus({
-          codeExecutionConfigured: data.codeExecution === "available",
-          providerConfigured: data.bridge === "available",
-          reachable: data.backend === "available",
-          schedulerConfigured: data.cron === "available",
-          stale:
-            data.workerHeartbeat === "stale" ||
-            data.workerHeartbeat === "failed",
+          codeExecutionConfigured: false,
+          providerConfigured: false,
+          reachable: false,
+          schedulerConfigured: false,
+          stale: true,
         });
-      })
-      .catch(() => {
-        if (active) {
-          setBackendStatus({
-            codeExecutionConfigured: false,
-            providerConfigured: false,
-            reachable: false,
-            schedulerConfigured: false,
-            stale: true,
-          });
-        }
-      });
+        setIntegrationSync((currentSync) => ({
+          ...currentSync,
+          error: true,
+          loading: false,
+        }));
+      }
+    }
+
+    void refreshIntegrationState();
+
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        void refreshIntegrationState(nextAppState);
+      }
+    });
 
     return () => {
       active = false;
+      subscription?.remove?.();
     };
-  }, [anonKey, backendConfig, session]);
+  }, [anonKey, backendConfig, email, session]);
 
   async function handleReceiptSelection(selectReceipt, source) {
     if (selectingSource) {

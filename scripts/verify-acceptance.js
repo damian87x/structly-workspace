@@ -92,7 +92,14 @@ const {
   TRIGGER_LIST_STATE,
   getDefaultTriggerDashboard,
   getTriggerListState,
+  normalizeTriggerDefinition,
+  normalizeTriggerRun,
 } = require("../src/lib/integrationDashboard");
+const {
+  createMobileDeviceHeartbeatPayload,
+  createMobileDeviceId,
+  getSessionUserId,
+} = require("../src/lib/mobileIntegrationRuntime");
 const {
   hasComposioSignature,
   normalizeComposioEvent,
@@ -2344,6 +2351,8 @@ function verifyIntegrationRoadmap() {
   assert.match(roadmap, /Composio and MCP are backend adapters/);
   assert.match(roadmap, /Schedules, Location Suggestions, And Code Runs/);
   assert.match(roadmap, /Daytona-style code execution/);
+  assert.match(roadmap, /foreground\/resume device heartbeats/);
+  assert.match(roadmap, /user-scoped mobile sync/);
   assert.match(roadmap, /npm run test:e2e/);
   assert.match(roadmap, /Mobile bundle\/env audit/);
   assert.match(pixelPlan, /Pixel device/);
@@ -2501,6 +2510,36 @@ function verifyHeartbeatClassificationModule() {
   assert.equal(
     createWorkerHeartbeat({ now, workerId: "worker-1" }).heartbeatType,
     "worker",
+  );
+  assert.equal(
+    getSessionUserId({ user: { email: "fallback@example.com", id: "user-1" } }),
+    "user-1",
+  );
+  assert.equal(
+    createMobileDeviceId({ platform: "android", userId: "user-1" }),
+    "structly:android:user-1",
+  );
+  assert.deepEqual(
+    createMobileDeviceHeartbeatPayload({
+      appState: "active",
+      capabilities: {
+        device: "Pixel",
+      },
+      platform: "android",
+      session: { user: { id: "user-1" } },
+    }),
+    {
+      appState: "active",
+      capabilities: {
+        background: "foreground_resume",
+        device: "Pixel",
+        location: "foreground_permission_required",
+        platform: "android",
+      },
+      deviceId: "structly:android:user-1",
+      platform: "android",
+      userId: "user-1",
+    },
   );
 }
 
@@ -2685,6 +2724,58 @@ function verifyIntegrationDashboardModule() {
     unavailable.runHistory.some(
       (run) => run.status === TRIGGER_RUN_STATUS.DEAD_LETTERED,
     ),
+  );
+
+  const synced = getDefaultTriggerDashboard({
+    backend: { reachable: true },
+    providerConfigured: true,
+    runHistory: [
+      {
+        id: "run-live",
+        status: TRIGGER_RUN_STATUS.APPROVAL_REQUIRED,
+        trigger_id: "trigger-live",
+        user_id: "user-1",
+      },
+    ],
+    syncHydrated: true,
+    triggers: [
+      {
+        id: "trigger-live",
+        name: "Live receipt follow-up",
+        source: "composio:gmail",
+        status: TRIGGER_STATUS.ACTIVE,
+        trigger_type: "receipt_reviewed",
+        user_id: "user-1",
+      },
+    ],
+    userId: "user-1",
+  });
+  const emptySynced = getDefaultTriggerDashboard({
+    backend: { reachable: true },
+    providerConfigured: true,
+    runHistory: [],
+    syncHydrated: true,
+    triggers: [],
+    userId: "user-1",
+  });
+
+  assert.equal(synced.triggers[0].name, "Live receipt follow-up");
+  assert.equal(synced.triggers[0].displayStatus, "Needs approval");
+  assert.equal(synced.runHistory[0].triggerId, "trigger-live");
+  assert.equal(synced.triggerListState, TRIGGER_LIST_STATE.LOADED);
+  assert.equal(emptySynced.triggerListState, TRIGGER_LIST_STATE.EMPTY);
+  assert.equal(
+    normalizeTriggerDefinition({
+      id: "trigger-snake",
+      trigger_type: "schedule_tick",
+      user_id: "user-1",
+    }).type,
+    "schedule_tick",
+  );
+  assert.equal(
+    normalizeTriggerRun({ id: "run-snake", trigger_id: "trigger-snake" })
+      .triggerId,
+    "trigger-snake",
   );
 }
 
@@ -3215,6 +3306,14 @@ function verifySupabaseIntegrationSources() {
     assert.ok(fs.existsSync(`supabase/functions/${functionName}/index.ts`));
   }
   assert.match(
+    fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
+    /auth\/v1\/user[\s\S]*user_id=eq\.\$\{userFilter\}[\s\S]*integration_sources/,
+  );
+  assert.doesNotMatch(
+    fs.readFileSync("supabase/functions/mobile-sync/index.ts", "utf8"),
+    /select=\*/,
+  );
+  assert.match(
     fs.readFileSync("supabase/functions/trigger-dispatch/index.ts", "utf8"),
     /integration_events[\s\S]*trigger_runs[\s\S]*on_conflict=trigger_id,idempotency_key/,
   );
@@ -3222,6 +3321,8 @@ function verifySupabaseIntegrationSources() {
     "supabase/functions/heartbeat-ingest/index.ts",
     "utf8",
   );
+  assert.match(heartbeatSource, /auth\/v1\/user/);
+  assert.match(heartbeatSource, /user_mismatch/);
   assert.match(heartbeatSource, /device_heartbeats/);
   assert.match(heartbeatSource, /worker_heartbeats/);
   assert.match(heartbeatSource, /resolution=merge-duplicates/);
@@ -3279,8 +3380,16 @@ function verifyIntegrationUiSource() {
   );
 
   assert.match(appSource, /Integration health/);
+  assert.match(appSource, /AppState\.addEventListener/);
   assert.match(appSource, /callIntegrationFunction/);
   assert.match(appSource, /functionName: "status-read"/);
+  assert.match(appSource, /functionName: "heartbeat-ingest"/);
+  assert.match(appSource, /functionName: "mobile-sync"/);
+  assert.match(appSource, /createMobileDeviceHeartbeatPayload/);
+  assert.match(appSource, /shouldSendHeartbeat/);
+  assert.match(appSource, /integrationSync/);
+  assert.match(appSource, /triggerDefinitions/);
+  assert.match(appSource, /runHistory/);
   assert.match(appSource, /providerConfigured: data\.bridge === "available"/);
   assert.match(appSource, /setBackendStatus/);
   assert.match(appSource, /getDefaultTriggerDashboard/);
@@ -3345,6 +3454,8 @@ function verifyE2EHarnessSource() {
   assert.match(e2eSource, /assertMobileSafeMcpServer/);
   assert.match(e2eSource, /Pixel/);
   assert.match(edgeHarnessSource, /vm\.runInNewContext/);
+  assert.match(edgeHarnessSource, /verifyMobileSyncFunction/);
+  assert.match(edgeHarnessSource, /verifyHeartbeatIngestFunction/);
   assert.match(edgeHarnessSource, /verifyScheduleJobsFunction/);
   assert.match(edgeHarnessSource, /verifyLocationSuggestionsFunction/);
   assert.match(edgeHarnessSource, /verifyCodeExecutionFunction/);

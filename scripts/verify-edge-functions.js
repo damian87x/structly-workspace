@@ -155,6 +155,119 @@ async function verifyScheduleJobsFunction() {
   assert.ok(calls.every((call) => call.body.user_id === "user-1"));
 }
 
+async function verifyMobileSyncFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/mobile-sync/index.ts", {
+    fetchImpl: createAuthedFetch({
+      calls,
+      restResponses: {
+        "integration_sources": [{ id: "source-1", source_key: "composio" }],
+        "trigger_definitions": [
+          { id: "trigger-1", name: "Receipt follow-up", user_id: "user-1" },
+        ],
+        "trigger_runs": [
+          { id: "run-1", status: "approval_required", user_id: "user-1" },
+        ],
+      },
+    }),
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const accepted = await readJson(
+    await handler(
+      createJsonRequest({
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const restCalls = calls.filter((call) => call.url.includes("/rest/v1/"));
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.connectors.length, 1);
+  assert.equal(accepted.data.triggerDefinitions.length, 1);
+  assert.equal(accepted.data.runHistory.length, 1);
+  assert.ok(restCalls.some((call) => call.url.includes("/integration_sources")));
+  assert.ok(restCalls.some((call) => call.url.includes("/trigger_definitions")));
+  assert.ok(restCalls.some((call) => call.url.includes("/trigger_runs")));
+  assert.ok(restCalls.every((call) => call.url.includes("user_id=eq.user-1")));
+}
+
+async function verifyHeartbeatIngestFunction() {
+  const calls = [];
+  const handler = loadEdgeHandler("supabase/functions/heartbeat-ingest/index.ts", {
+    fetchImpl: createAuthedFetch({ calls }),
+  });
+
+  const rejected = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          deviceId: "pixel-1",
+          platform: "android",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer invalid-token" },
+      }),
+    ),
+  );
+
+  assert.equal(rejected.status, 401);
+  assert.equal(calls.length, 0);
+
+  const mismatch = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          deviceId: "pixel-1",
+          platform: "android",
+          userId: "user-2",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+
+  assert.equal(mismatch.status, 403);
+  assert.equal(mismatch.data.error, "user_mismatch");
+  assert.equal(calls.length, 0);
+
+  const accepted = await readJson(
+    await handler(
+      createJsonRequest({
+        body: {
+          appState: "active",
+          capabilities: { device: "Pixel" },
+          deviceId: "pixel-1",
+          platform: "android",
+          userId: "user-1",
+        },
+        headers: { Authorization: "Bearer user-token" },
+      }),
+    ),
+  );
+  const heartbeatCall = calls.find((call) =>
+    call.url.includes("/device_heartbeats"),
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.type, "device");
+  assert.equal(accepted.data.persisted, true);
+  assert.ok(heartbeatCall);
+  assert.equal(heartbeatCall.body.user_id, "user-1");
+  assert.equal(heartbeatCall.body.device_id, "pixel-1");
+  assert.equal(heartbeatCall.body.capabilities.device, "Pixel");
+}
+
 async function verifyLocationSuggestionsFunction() {
   const calls = [];
   const handler = loadEdgeHandler(
@@ -492,6 +605,8 @@ async function verifyComposioWebhookFunction() {
 }
 
 async function main() {
+  await verifyMobileSyncFunction();
+  await verifyHeartbeatIngestFunction();
   await verifyScheduleJobsFunction();
   await verifyLocationSuggestionsFunction();
   await verifyCodeExecutionFunction();
