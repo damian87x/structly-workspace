@@ -8,7 +8,7 @@ function getReceiptList(receipts) {
 }
 
 function buildReceiptSummary(receipts, sheet) {
-  return {
+  return sheet.summary || {
     needsReviewCount: sheet.validation?.needsReviewCount || 0,
     rowCount: receipts.length,
   };

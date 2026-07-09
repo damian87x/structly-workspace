@@ -2,6 +2,11 @@ const FIELD_COLUMNS = ["vendor", "date", "net", "vat", "gross", "category"];
 const CONTEXT_COLUMNS = ["location", "billable_client"];
 const COLUMNS = [...FIELD_COLUMNS, ...CONTEXT_COLUMNS];
 const HEADER_ROW = COLUMNS.join(",");
+const READY_STATUS = {
+  EMPTY: "empty",
+  NEEDS_REVIEW: "needs_review",
+  READY: "ready",
+};
 
 function formatCellValue(value) {
   if (value === null || value === undefined) {
@@ -145,6 +150,148 @@ function buildDuplicates(receipts) {
   return Array.from(groups.values()).filter((group) => group.rows.length > 1);
 }
 
+function parseAmount(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value).trim().replace(/[£$€,\s]/g, "");
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function roundMoney(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeBreakdownLabel(value, fallback) {
+  const normalized = normalizeKeyPart(value);
+
+  return normalized || fallback;
+}
+
+function addBreakdownValue(map, label, gross) {
+  const current = map.get(label) || {
+    count: 0,
+    gross: 0,
+  };
+
+  current.count += 1;
+  current.gross += gross || 0;
+  map.set(label, current);
+}
+
+function buildBreakdownRows(map, labelKey) {
+  return Array.from(map.entries())
+    .sort(([leftLabel, left], [rightLabel, right]) => {
+      const grossDifference = right.gross - left.gross;
+
+      return grossDifference || leftLabel.localeCompare(rightLabel);
+    })
+    .map(([label, value]) => ({
+      [labelKey]: label,
+      count: value.count,
+      gross: roundMoney(value.gross),
+    }));
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+function buildSummary(receipts, validation) {
+  const categoryMap = new Map();
+  const billableMap = new Map();
+  const locationMap = new Map();
+  const totals = receipts.reduce(
+    (currentTotals, receipt) => {
+      const fields = getFields(receipt);
+      const contextFields = getContextFields(receipt);
+      const gross = parseAmount(fields.gross);
+      const net = parseAmount(fields.net);
+      const vat = parseAmount(fields.vat);
+
+      if (gross !== null) {
+        currentTotals.totalGross += gross;
+      }
+
+      if (net !== null) {
+        currentTotals.totalNet += net;
+      }
+
+      if (vat !== null) {
+        currentTotals.totalVat += vat;
+      }
+
+      addBreakdownValue(
+        categoryMap,
+        normalizeBreakdownLabel(fields.category, "Uncategorised"),
+        gross,
+      );
+
+      if (contextFields.billable_client) {
+        addBreakdownValue(billableMap, contextFields.billable_client, gross);
+      }
+
+      if (contextFields.location) {
+        addBreakdownValue(locationMap, contextFields.location, gross);
+      }
+
+      return currentTotals;
+    },
+    {
+      totalGross: 0,
+      totalNet: 0,
+      totalVat: 0,
+    },
+  );
+  const blockers = [];
+
+  if (validation.needsReviewCount > 0) {
+    blockers.push(
+      `${validation.needsReviewCount} ${pluralize(
+        validation.needsReviewCount,
+        "row",
+      )} ${validation.needsReviewCount === 1 ? "needs" : "need"} review`,
+    );
+  }
+
+  if (validation.duplicateCount > 0) {
+    blockers.push(
+      `${validation.duplicateCount} possible ${pluralize(
+        validation.duplicateCount,
+        "duplicate",
+      )}`,
+    );
+  }
+
+  return {
+    billableTotals: buildBreakdownRows(billableMap, "billableClient"),
+    blockerCount: blockers.length,
+    blockers,
+    categoryTotals: buildBreakdownRows(categoryMap, "category"),
+    duplicateCount: validation.duplicateCount,
+    locationTotals: buildBreakdownRows(locationMap, "location"),
+    needsReviewCount: validation.needsReviewCount,
+    ready: receipts.length > 0 && blockers.length === 0,
+    rowCount: receipts.length,
+    status:
+      receipts.length === 0
+        ? READY_STATUS.EMPTY
+        : blockers.length > 0
+          ? READY_STATUS.NEEDS_REVIEW
+          : READY_STATUS.READY,
+    totalGross: roundMoney(totals.totalGross),
+    totalNet: roundMoney(totals.totalNet),
+    totalVat: roundMoney(totals.totalVat),
+  };
+}
+
 function buildCsv(receipts) {
   const rows = receipts.map((receipt) => {
     const fields = getFields(receipt);
@@ -163,15 +310,17 @@ function buildReceiptSheet(receipts) {
   const receiptList = Array.isArray(receipts) ? receipts : [];
   const needsReviewRows = buildNeedsReviewRows(receiptList);
   const duplicates = buildDuplicates(receiptList);
+  const validation = {
+    duplicateCount: duplicates.length,
+    duplicates,
+    needsReviewCount: needsReviewRows.length,
+    needsReviewRows,
+  };
 
   return {
     csv: buildCsv(receiptList),
-    validation: {
-      duplicateCount: duplicates.length,
-      duplicates,
-      needsReviewCount: needsReviewRows.length,
-      needsReviewRows,
-    },
+    summary: buildSummary(receiptList, validation),
+    validation,
   };
 }
 

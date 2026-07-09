@@ -59,6 +59,11 @@ import {
 } from "./src/lib/receiptContextReview";
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
+const PACK_STATUS_LABELS = {
+  empty: "No rows",
+  needs_review: "Needs review",
+  ready: "Ready",
+};
 const INTEGRATION_CONTROL_ROWS = [
   ["Create trigger", "create", "canCreate"],
   ["Edit", "update", "canEdit"],
@@ -73,6 +78,10 @@ function formatFieldValue(value) {
   }
 
   return String(value);
+}
+
+function formatMoney(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
 }
 
 function isSameReviewedReceipt(currentReceipt, expectedReceipt) {
@@ -275,10 +284,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     () => buildReceiptSheet(reviewedReceipts),
     [reviewedReceipts],
   );
-  const receiptSummary = {
-    needsReviewCount: receiptSheet.validation.needsReviewCount,
-    rowCount: reviewedReceipts.length,
-  };
+  const receiptSummary = receiptSheet.summary;
+  const packStatusLabel =
+    PACK_STATUS_LABELS[receiptSummary.status] || PACK_STATUS_LABELS.empty;
   const integrationDashboard = useMemo(
     () =>
       getDefaultTriggerDashboard({
@@ -750,11 +758,38 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
         <Text style={styles.title}>Capture</Text>
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Receipt pack</Text>
-          <Text style={styles.panelValue}>Ready</Text>
+          <Text
+            style={
+              receiptSummary.status === "needs_review"
+                ? styles.reviewValue
+                : styles.panelValue
+            }
+          >
+            {packStatusLabel}
+          </Text>
           <Text style={styles.panelMeta}>Rows: {receiptSummary.rowCount}</Text>
           <Text style={styles.panelMeta}>
             Needs review: {receiptSummary.needsReviewCount}
           </Text>
+          <Text style={styles.panelMeta}>
+            Duplicates: {receiptSummary.duplicateCount}
+          </Text>
+          <Text style={styles.panelMeta}>
+            Gross total: {formatMoney(receiptSummary.totalGross)}
+          </Text>
+          <Text style={styles.panelMeta}>
+            VAT total: {formatMoney(receiptSummary.totalVat)}
+          </Text>
+          {receiptSummary.categoryTotals[0] ? (
+            <Text style={styles.panelMeta}>
+              Top category: {receiptSummary.categoryTotals[0].category}
+            </Text>
+          ) : null}
+          {receiptSummary.blockers.length > 0 ? (
+            <Text style={styles.panelMeta}>
+              Blockers: {receiptSummary.blockers.join("; ")}
+            </Text>
+          ) : null}
           {email ? <Text style={styles.panelMeta}>Signed in as {email}</Text> : null}
           <Pressable
             accessibilityRole="button"

@@ -260,6 +260,12 @@ function verifyScaffoldFiles() {
   );
   assert.match(appSource, /Rows:/);
   assert.match(appSource, /Needs review:/);
+  assert.match(appSource, /Duplicates:/);
+  assert.match(appSource, /Gross total:/);
+  assert.match(appSource, /VAT total:/);
+  assert.match(appSource, /Top category:/);
+  assert.match(appSource, /Blockers:/);
+  assert.match(appSource, /PACK_STATUS_LABELS/);
   assert.match(appSource, /Review receipt/);
   assert.match(appSource, /Correct \{reviewField\}/);
   assert.match(appSource, /function handleReceiptCorrection/);
@@ -1007,6 +1013,49 @@ function verifyBuildSpreadsheetModule() {
   assert.deepEqual(cleanSheet.validation.duplicates, []);
   assert.equal(cleanSheet.validation.needsReviewCount, 0);
   assert.equal(cleanSheet.validation.duplicateCount, 0);
+  assert.deepEqual(cleanSheet.summary, {
+    billableTotals: [
+      {
+        billableClient: "Acme Ltd",
+        count: 1,
+        gross: 18,
+      },
+    ],
+    blockerCount: 0,
+    blockers: [],
+    categoryTotals: [
+      {
+        category: "Travel",
+        count: 1,
+        gross: 18,
+      },
+      {
+        category: "Office",
+        count: 1,
+        gross: 12,
+      },
+      {
+        category: "Meals, team",
+        count: 1,
+        gross: 6.6,
+      },
+    ],
+    duplicateCount: 0,
+    locationTotals: [
+      {
+        location: "Soho Market",
+        count: 1,
+        gross: 18,
+      },
+    ],
+    needsReviewCount: 0,
+    ready: true,
+    rowCount: 3,
+    status: "ready",
+    totalGross: 36.6,
+    totalNet: 30.5,
+    totalVat: 6.1,
+  });
 
   const vatIssue = {
     difference: 1.5,
@@ -1042,6 +1091,10 @@ function verifyBuildSpreadsheetModule() {
     },
   ]);
   assert.deepEqual(reviewSheet.validation.duplicates, []);
+  assert.deepEqual(reviewSheet.summary.blockers, ["1 row needs review"]);
+  assert.equal(reviewSheet.summary.ready, false);
+  assert.equal(reviewSheet.summary.status, "needs_review");
+  assert.equal(reviewSheet.summary.totalGross, 13.5);
 
   const duplicateSheet = buildReceiptSheet([
     {
@@ -1101,6 +1154,21 @@ function verifyBuildSpreadsheetModule() {
       vendor: "Duplicate Cafe",
     },
   ]);
+  assert.deepEqual(duplicateSheet.summary.blockers, ["1 possible duplicate"]);
+  assert.deepEqual(duplicateSheet.summary.categoryTotals, [
+    {
+      category: "Meals",
+      count: 2,
+      gross: 24,
+    },
+    {
+      category: "Travel",
+      count: 1,
+      gross: 12,
+    },
+  ]);
+  assert.equal(duplicateSheet.summary.ready, false);
+  assert.equal(duplicateSheet.summary.status, "needs_review");
 }
 
 async function verifyExportShareModule() {
@@ -1240,8 +1308,30 @@ async function verifyExportReviewedReceiptsHelper() {
   assert.equal(result.sheet.csv, expectedCsv);
   assert.equal(result.sheet.validation.needsReviewCount, 1);
   assert.deepEqual(result.summary, {
+    billableTotals: [],
+    blockerCount: 1,
+    blockers: ["1 row needs review"],
+    categoryTotals: [
+      {
+        category: "Office",
+        count: 1,
+        gross: 24,
+      },
+      {
+        category: "Meals",
+        count: 1,
+        gross: 13.5,
+      },
+    ],
+    duplicateCount: 0,
+    locationTotals: [],
     needsReviewCount: 1,
+    ready: false,
     rowCount: 2,
+    status: "needs_review",
+    totalGross: 37.5,
+    totalNet: 30,
+    totalVat: 6,
   });
   assert.deepEqual(result.exportResult, { shared: true, uri: expectedUri });
 
