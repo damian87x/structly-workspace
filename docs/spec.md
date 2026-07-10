@@ -1,9 +1,9 @@
-# Structly — Corrected Product Spec & Build Plan (v4)
+# Structly — Corrected Product Spec & Build Plan (v4.1)
 
 **Working name:** Structly
 **Owner:** Damian B
-**Date:** 04 July 2026
-**Status:** Corrected after Model Council review (Claude Opus 4.8, GPT 5.5, Gemini 3.1 Pro)
+**Date:** 04 July 2026 (v4) · 10 July 2026 (v4.1 seat-review corrections)
+**Status:** Corrected after Model Council review (Claude Opus 4.8, GPT 5.5, Gemini 3.1 Pro); v4.1 applies the v4 seat-review caveats (GPT-5.5-codex + Gemini seats, both PIVOT-with-fixes — see `docs/council/v4-seat-gpt55-codex.md`, `docs/council/v4-seat-gemini.md`)
 **Platforms:** iOS-first (TestFlight → App Store), Android as a fast-follow
 **Core principle of this revision:** radical subtraction — ship the one narrow, recurring, trust-sensitive workflow you can own, with the OAuth facts corrected *before* building.
 
@@ -22,6 +22,20 @@ The council reviewed v3 and hardened its verdict from v2's "pivot" to two PIVOTs
 | Power tier £17.99 / 500 captures with open analysis | **Removed the margin-negative tier.** Pricing anchored to the £2–£10/mo market with hard usage caps | [SnapTrac](https://apps.apple.com/gb/app/snaptrac-receipt-scanner/id6767394756), [ReceiptsAI](https://receiptsai.com/tools/receipt-scanner) |
 | "RegTech-grade" prompt-injection threat model | Dropped the claim. Ships a **minimum-viable security posture** appropriate to a solo MVP; RegTech claims deferred until an actual assessment exists | Council security review |
 | "Capture → any output" (8 output types) | **One workflow:** multi-receipt/table capture → verified spreadsheet. Breadth is a Phase-2+ decision, not a launch bet | Council retention/focus finding |
+
+### v4 → v4.1 (seat-review corrections, 10 Jul 2026)
+
+The two v4 seat reviews returned PIVOT-with-fixes. v4.1 applies each finding without changing the strategy:
+
+| v4 defect (seat) | v4.1 correction |
+|---|---|
+| "Capture" metering ambiguity: Pro could mean 100 jobs × 30 receipts = 3,000 receipts at ~£0.002 each (GPT-5.5) | **Meter per receipt, not per capture-job** — §10 rewritten; conservative caps until COGS measured |
+| Golden test pack built Day 13, *after* extraction work (GPT-5.5) | Pack assembled **before** extraction work; it gates Days 5–6 — §11 |
+| §9 compliance too thin for App Store + GDPR (GPT-5.5) | §9 expanded: Apple 5.1.1 account deletion, privacy labels, AI-provider disclosure, lawful basis, processor/DPA list, DSAR, retention, breach, transfer basis |
+| §15 "Drive/Sheets" could reintroduce restricted-scope creep; Composio option lacked a DPA/residency gate (GPT-5.5) | Phase 3 pinned to **`drive.file` only**; Composio adoption gated on a recorded DPA/subprocessor/EU-residency decision |
+| **MTD blind spot**: a generic `.xlsx` is a non-compliant intermediate step — users must re-key into HMRC-recognised software (Gemini) | Export presets are **import-ready for MTD-recognised tools** (Xero/QuickBooks/FreeAgent CSV layouts) in the MVP; Phase 4 targets MTD bridging/recognition — §5, §14, §15 |
+| Free FreeAgent (via NatWest/Mettle bank accounts) undercuts £6.99 (Gemini) | Named in §14 risks; positioning sharpened to the pre-accounting "verified pack" step |
+| Batch correction of 5–30 receipts on a phone is a UX cliff (Gemini) | Every row carries a source-image reference (already built); flagged-row correction opens the source image alongside the fields — §5, §14 |
 
 ---
 
@@ -85,6 +99,10 @@ Explicitly **not** the launch target: the broad "point at anything" consumer, wh
 - A **summary sheet** (totals by category, total VAT, period total, ready for VAT return).
 → Preview → user corrects any flagged rows inline → export/share.
 
+**Correction UX (the 30-receipt cliff, addressed):** every row carries its source-image reference, and tapping a flagged row shows the source image *alongside* the editable fields — the user verifies against the actual receipt, never against memory. Correction is triaged (only flagged rows are queued), not a 30-row spreadsheet crawl on a phone.
+
+**Export presets (the MTD reality, addressed):** the pack is an *input* to the user's legally-required MTD-recognised software, so the CSV export ships with **import-ready column presets for Xero, QuickBooks, and FreeAgent** from day one. Structly is positioned as the verification step *before* the books — not a rival system of record — until Phase 4 makes the push direct.
+
 Secondary (same engine): photograph an itemised table → clean `.csv`.
 
 ---
@@ -142,27 +160,40 @@ When Phase 2 adds `gmail.send`: add **recipient identity-binding** (the app may 
 ## 9. Privacy & Compliance (accurate)
 
 - **No passwords, no OAuth in MVP.** Nothing to verify, nothing to assess.
-- Images/captures deleted after processing unless the user enables history.
+- Images/captures deleted after processing unless the user enables history; a **written retention schedule** per data class (images, extracted rows, artifacts, logs) ships with the privacy policy.
 - Data export + delete-account controls from day one (GDPR data-subject rights; you are UK/Poland-based).
 - No training on user data.
 - **When email is added (Phase 2):** ship under Structly's own verified OAuth app using `gmail.send` (Sensitive scope, ~10-business-day verification, **no CASA**). Budget 6 weeks + a CASA assessment (~$540–$4,500/yr) *only* if a Restricted scope (drafts/read/modify) is ever genuinely required — and default to never needing one.
 - **EU data residency:** achievable in the MVP because there is no Composio/Daytona dependency; host the backend + storage in an EU region (e.g. Supabase EU, EU object storage) from the start. This keeps the future RegTech B2B door open without an enterprise contract.
 
+**App Store launch requirements (seat finding: these are launch gates, not paperwork-later):**
+- **In-app account deletion** (Apple 5.1.1 — mandatory for account-creating apps) — the delete-account control above must be reachable in-app, not via support email.
+- **Privacy "nutrition labels"** declaring all data collected *including by third-party SDKs* (photos/user content, financial info, identifiers, diagnostics — Supabase, PostHog, RevenueCat, the vision provider).
+- **AI-provider disclosure**: user-facing consent/disclosure that captured images are processed by a third-party AI service (also required by Google Play policy 5.1.1 for the Android follow-up). Product language only — no internal provider names in the UI (see repo copy rule).
+
+**GDPR/UK GDPR posture (named, not implied):**
+- **Lawful basis:** contract (Art. 6(1)(b)) for processing captures into artifacts; legitimate interest for product analytics with opt-out.
+- **Processor/sub-processor list + DPAs on file:** Supabase (EU), object storage, vision/LLM provider, RevenueCat, PostHog — published in the privacy policy.
+- **Cross-border transfers:** if any processor (notably the vision provider) processes outside the UK/EU, rely on SCCs/UK IDTA and say so; prefer EU processing endpoints where offered.
+- **DSAR workflow** (export + erasure within statutory deadlines) and a **breach-notification process** (72-hour ICO clock) written down before beta, not after.
+
 ---
 
 ## 10. Monetization (market-anchored, caps enforced)
 
-The council found market WTP for this workflow is **£2–£10/mo**, and that v3's £17.99/500-capture "analysis" tier was margin-negative. v4 pricing:
+The council found market WTP for this workflow is **£2–£10/mo**, and that v3's £17.99/500-capture "analysis" tier was margin-negative. The v4 seat review then caught a metering ambiguity: "100 captures/mo" with 30 receipts/job could be read as 3,000 receipts/month (~£0.002 gross contribution per receipt — margin-negative under any retry/support load). v4.1 closes it:
+
+**Metering rule: the quota unit is the *receipt* (one receipt or table page = one metered unit). A multi-receipt job debits one unit per receipt it contains.** COGS is measured against the golden pack + beta telemetry before any cap is raised; caps below are deliberately conservative and may move up, never silently.
 
 | Tier | Price | Includes | Hard caps |
 |---|---|---|---|
-| **Free** | £0 | 5 captures/mo, single-sheet export, watermark on export | 5 receipts/job |
-| **Pro** | £6.99/mo (or £49/yr) | 100 captures/mo, validation sheet, category memory, recurring-pack reminder, unwatermarked export | 30 receipts/job; file-size + row caps |
+| **Free** | £0 | Single-sheet export, watermark on export | **15 receipts/mo**; 5 receipts/job |
+| **Pro** | £6.99/mo (or £49/yr) | Validation sheet, category memory, recurring-pack reminder, unwatermarked export, MTD-ready export presets | **300 receipts/mo**; 30 receipts/job; file-size + row caps |
 | **Business** (Phase 3+) | TBD after connectors land | Everything in Pro + connector push (Xero/QuickBooks) + audit export | Set at launch of that phase |
 
 - **No lifetime tier** — the council warned it masks a broken product and mismatches usage-based COGS.
-- **Monthly-first** (productivity apps are ~77% monthly; annual can hide churn). Offer an annual plan only after repeat use is proven.
-- Deterministic templates keep COGS dominated by a single cheap extraction pass, so Pro margins are healthy at these caps. Every tier has explicit per-job caps so no user can go margin-negative.
+- **Monthly-first** (productivity apps are ~77% monthly; annual can hide churn). The £49/yr plan nets only ~£3.47/mo after the 15% commission — keep it, but treat annual-heavy cohorts as a churn-masking signal, and only promote annual after repeat use is proven.
+- Deterministic templates keep COGS dominated by a single cheap extraction pass, so Pro margins are healthy at these caps. Every tier has explicit per-receipt and per-job caps so no user can go margin-negative.
 - Billing via RevenueCat (free under $2,500 MTR, then 1%).
 
 ---
@@ -172,9 +203,9 @@ The council found market WTP for this workflow is **£2–£10/mo**, and that v3
 The 14-day public launch is impossible (Android's 12-tester/14-day closed-test gate alone exceeds it, before any OAuth review). This plan targets a **TestFlight beta in ~3 weeks** and a public App Store launch shortly after; Android follows once the closed-test clock has run.
 
 ### Week 1 — Capture → extraction → data on screen
-- Days 1–2: Expo skeleton, auth (Supabase, email/password — no Google OAuth), navigation, backend repo, EU-region storage.
+- Days 1–2: Expo skeleton, auth (Supabase, email/password — no Google OAuth), navigation, backend repo, EU-region storage. **In parallel: assemble the golden test pack** — 30–50 real receipts/tables with expected JSON, expected `.xlsx` outputs, and pass/fail accuracy thresholds. The pack exists *before* extraction work and gates it (seat finding: building it on Day 13 reverses the quality process).
 - Days 3–4: Camera + gallery capture (single + batch), upload, compression, store capture.
-- Days 5–6: Vision extraction → strict JSON schema; extraction-result UI with confidence flags.
+- Days 5–6: Vision extraction → strict JSON schema; extraction-result UI with confidence flags. **Exit criterion: golden-pack accuracy thresholds met**, not "demo looks right."
 
 ### Week 2 — Deterministic output + correction + paywall
 - Days 7–8: Deterministic `.xlsx`/`.csv` template engine (data + validation + summary sheets); VAT math, duplicate detection, totals reconciliation.
@@ -183,7 +214,7 @@ The 14-day public launch is impossible (Android's 12-tester/14-day closed-test g
 - Days 11–12: RevenueCat products, entitlement gating, quota metering, restore purchases.
 
 ### Week 3 — Trust, polish, beta
-- Day 13: Golden test pack (30–50 receipts) + regression run; fix extraction/validation accuracy.
+- Day 13: Full golden-pack regression run against the release build (the pack itself was built in Week 1); fix any extraction/validation regressions.
 - Day 14: Hard caps, audit logging, delete-capture/delete-account, privacy policy.
 - Day 15: UX polish — loading, errors, retake, empty states, recurring-pack reminder.
 - Days 16–17: TestFlight build, sandbox purchases, PostHog events, landing page.
@@ -195,7 +226,7 @@ The 14-day public launch is impossible (Android's 12-tester/14-day closed-test g
 
 ## 12. MVP Acceptance Criteria
 
-A user can: install → sign in (email) → photograph a stack of receipts → see extracted rows with confidence flags → correct any flagged row → get a verified `.xlsx` (data + validation + summary) → preview → export/share via the native sheet → hit the paywall after the free allowance → subscribe to Pro and unlock 100 captures/mo + the validation sheet + category memory. **No OAuth, no external send, no code execution anywhere in this path.**
+A user can: install → sign in (email) → photograph a stack of receipts → see extracted rows with confidence flags → correct any flagged row *with the source image shown alongside* → get a verified `.xlsx` (data + validation + summary) → preview → export/share via the native sheet (including an MTD-ready CSV preset) → hit the paywall after the free allowance (15 receipts/mo) → subscribe to Pro and unlock 300 receipts/mo + the validation sheet + category memory. **No OAuth, no external send, no code execution anywhere in this path.** Quotas are metered per receipt, and a multi-receipt job debits one unit per receipt.
 
 ---
 
@@ -220,14 +251,17 @@ Track: `capture_started`, `capture_completed`, `rows_corrected`, `export_complet
 | OAuth/CASA blocking launch | **No OAuth in MVP.** Phase 2 uses `gmail.send` (Sensitive, no CASA); Restricted scopes avoided by design |
 | EU data residency for future B2B | EU-region hosting from day one; no Composio/Daytona dependency to complicate residency |
 | Prompt injection | No external write actions and no code execution in MVP removes the class; identity-bound recipients when email lands |
+| **MTD makes a generic spreadsheet a redundant step** (sole traders must file via HMRC-recognised software) | Position as the *verification step before the books*: MTD-ready import presets (Xero/QuickBooks/FreeAgent) in the MVP; Phase 4 targets direct push or MTD bridging-software recognition |
+| **Free all-in-one incumbents** (FreeAgent free via NatWest/Mettle; Xero/QuickBooks starter ~£7–£14/mo) | Don't compete as a system of record. Sell the pre-accounting pain: batch capture + visible verification + audit trail, which those suites do poorly; price stays under the starter-plan floor |
+| **Batch-correction UX on mobile** (matching 30 physical receipts to 30 rows) | Row↔source-image linking: tapping a flagged row shows the receipt photo next to the fields; only flagged rows enter the correction queue; golden pack measures correction time as a release metric |
 
 ---
 
 ## 15. Roadmap Beyond MVP (gated on retention)
 
 - **Phase 2 — Delivery + light compute:** `gmail.send` email of the pack (own verified OAuth app, Sensitive scope); Daytona (or E2B, re-evaluated for isolation/EU) *only* for an opt-in "analyse any dataset / custom chart" power feature, behind explicit token/runtime caps.
-- **Phase 3 — Connectors:** one non-restricted push path first (e.g. save to a user-chosen Drive/Sheets or Xero) via Composio *or* direct API, evaluated on EU residency and lock-in; add more only as users ask.
-- **Phase 4 — B2B vertical:** the genuine WTP niche — receipts/bills → accountant-ready sheet → **Xero/QuickBooks push with audit trail** for UK bookkeepers and micro-business finance ops. This is where connectors, EU residency, and (eventually) a real security assessment justify their cost. Sell to 5 design-partner businesses before generalising.
+- **Phase 3 — Connectors:** one non-restricted push path first via direct API or Composio. Google surface is pinned to **`drive.file` only** (non-sensitive, per-file app access — never full `drive`, never Sheets-wide scopes); anything broader reopens restricted review and is out by design. **Composio adoption gate:** before any Composio integration ships, record a decision covering DPA/sub-processor status, EU data-residency tier (their residency is Enterprise/VPC-only), and their May-2026 incident history — and keep it wrapped behind Structly's own adapter interface (already the pattern in the integration substrate) so it stays swappable.
+- **Phase 4 — B2B vertical:** the genuine WTP niche — receipts/bills → accountant-ready sheet → **Xero/QuickBooks push with audit trail** for UK bookkeepers and micro-business finance ops. **Destination requirement: MTD.** UK sole traders are legally pushed toward HMRC-recognised software; a generic spreadsheet is an intermediate step. Phase 4 therefore targets either direct push into MTD-recognised tools or Structly itself qualifying as MTD **bridging software** — that is what converts the pack from "data-entry prelude" into the compliance outcome users actually pay for. This is where connectors, EU residency, and (eventually) a real security assessment justify their cost. Sell to 5 design-partner businesses before generalising.
 - **Phase 5 — Android power mode (private/B2B only):** unchanged from prior specs — OpenClaw/Termux/ADB automation for private distribution; never in the consumer app.
 
 ---
