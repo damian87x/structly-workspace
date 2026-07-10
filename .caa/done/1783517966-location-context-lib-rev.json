@@ -1,0 +1,15 @@
+{
+  "id": "1783517966-location-context-lib-rev",
+  "source": "local",
+  "title": "Location context lib: reverse-geocode the capture location",
+  "userStory": "As a user, my camera-captured receipt records where I was so the place auto-fills.",
+  "acceptanceCriteria": [
+    "src/lib/locationContext.js exports getReceiptLocation({ location }) using an INJECTABLE location provider (real default lazily requires expo-location + When-In-Use permission; fake in tests). Granted -> { latitude, longitude, placeName, city, region, country }. Denied/unavailable/error -> null. Partial (position ok but reverse-geocode empty) -> coords with placeName:null (NOT null).",
+    "Exports attachLocation(receipt, locationContext) -> a NEW receipt with context.location (pure; input unmutated).",
+    "npm test passes (dep-free, network-blocked via the existing withNetworkBlocked pattern) with fakes covering granted / denied / partial, and attachLocation immutability."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

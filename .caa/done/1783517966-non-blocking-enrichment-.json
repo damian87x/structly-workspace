@@ -1,0 +1,15 @@
+{
+  "id": "1783517966-non-blocking-enrichment-",
+  "source": "local",
+  "title": "Non-blocking enrichment: wire location + calendar off the critical path",
+  "userStory": "As a user, enrichment happens automatically after capture but NEVER blocks me from reviewing/exporting.",
+  "acceptanceCriteria": [
+    "src/lib/enrichReceipt.js exports enrichReceipt(receipt, { location, calendar, events }) - for a source==='camera' receipt, runs location + calendar enrichment and returns the receipt with context attached; ANY provider failure/denial/slowness resolves to the un-enriched receipt (each wrapped so it cannot reject the whole).",
+    "App.js CaptureScreen calls enrichReceipt OFF the critical path after confirmReceiptExtraction; the capture->extract->review->export flow completes regardless of the enrichment outcome.",
+    "npm test passes: enrichment attaches context on success; a slow / denied / throwing provider still yields a usable receipt AND the pipeline result is produced (proves non-blocking). App.js source asserts enrichReceipt is wired."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "1783431512-spreadsheet-build-extrac",
+  "source": "local",
+  "title": "Spreadsheet build: extracted receipts to CSV plus validation summary",
+  "userStory": "As a user, after extracting receipts, Structly builds a clean CSV plus a validation summary (needs-review rows, VAT flags, duplicates) so I can export a verified spreadsheet.",
+  "acceptanceCriteria": [
+    "src/lib/buildSpreadsheet.js exports buildReceiptSheet(receipts) returning { csv, validation }, where each receipt is an extractReceipt output ({ fields, validation })",
+    "csv has a header row (vendor,date,net,vat,gross,category) and one row per receipt, amounts as numbers and dates in ISO format, values properly escaped",
+    "validation lists every needs-review row with its reasons and flags duplicates (same vendor+date+gross appearing more than once)",
+    "scripts/verify-acceptance.js tests buildReceiptSheet with sample receipts covering a clean set, a needs-review row, and a duplicate pair",
+    "npm test passes, dependency-free (no new packages, no network call)",
+    "No Google or OAuth dependency is added"
+  ],
+  "tags": [
+    "backend",
+    "spreadsheet"
+  ]
+}

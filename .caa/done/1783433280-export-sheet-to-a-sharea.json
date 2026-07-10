@@ -1,0 +1,16 @@
+{
+  "id": "1783433280-export-sheet-to-a-sharea",
+  "source": "local",
+  "title": "Export sheet to a shareable CSV file",
+  "userStory": "As a user I can export my receipts as a CSV file I can share from the app.",
+  "acceptanceCriteria": [
+    "src/lib/exportShare.js exports exportSheet({csv, filename}, {writeFile, share}) using INJECTABLE writeFile and share (real by default, fakes in tests).",
+    "Filename is sanitized: strips path separators/traversal and ensures a .csv extension; empty or whitespace csv is rejected with a clear error.",
+    "On success it writes the csv to the resolved path and calls share with that uri, then returns { uri, shared: true }.",
+    "npm test passes with cases: writes to the expected sanitized path, share called with the uri, empty csv rejected, traversal filename neutralized."
+  ],
+  "tags": [
+    "frontend",
+    "export"
+  ]
+}

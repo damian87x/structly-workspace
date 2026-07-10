@@ -1,0 +1,16 @@
+{
+  "id": "1783517966-calendar-context-lib-mat",
+  "source": "local",
+  "title": "Calendar context lib: match receipt time to a meeting",
+  "userStory": "As a professional, my receipt is matched to the meeting I was in so it can be billed to that client.",
+  "acceptanceCriteria": [
+    "src/lib/calendarContext.js exports findEventForReceipt(capturedAt, events, { windowMinutes = 90 }) - PURE: overlapping event wins, else nearest start within the window, else null; empty events -> null. Test fixtures pin explicit UTC offsets so matching is deterministic across timezones.",
+    "Exports getReceiptCalendarContext(capturedAt, { calendar }) - INJECTABLE calendar provider (real default lazily requires expo-calendar, requests FULL calendar access since iOS has no read-only events scope, getEventsAsync around capturedAt; fake in tests). Denied/none -> null.",
+    "Exports deriveBillable(event) -> { billable, client, project } (conservative title/attendee/organizer heuristic) and attachCalendarContext(receipt, calContext) -> NEW receipt with context.calendar + context.billable (pure).",
+    "npm test passes with fakes: match / nearest / outside-window / empty; deriveBillable client-titled vs personal; getReceiptCalendarContext denied -> null."
+  ],
+  "tags": [
+    "data",
+    "integration"
+  ]
+}

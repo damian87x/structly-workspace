@@ -1,0 +1,8 @@
+{
+  "driver": "codex",
+  "verifyCommand": "npm test",
+  "maxWorkers": 1,
+  "launchArgs": "--sandbox workspace-write --ask-for-approval never",
+  "openPr": false,
+  "workerNetwork": true
+}

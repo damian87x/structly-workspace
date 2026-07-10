@@ -7,3 +7,22 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+
+# CAA orchestrator scratch (durable provenance — config, done/, memory/, results/ — stays tracked)
+.caa/traces/
+.caa/worktrees/
+.caa/inbox/
+.caa/active/
+.caa/queue/
+.caa/*.log
+.caa/run.out
+.caa/state.json
+.caa/events.log
+.caa/STOP
+# session-local plugin state
+.omc/sessions/
+.omc/state/sessions/
+.omc/state/checkpoints/
+.omc/state/agent-replay-*.jsonl
+.omc/project-memory.json
+.omx/

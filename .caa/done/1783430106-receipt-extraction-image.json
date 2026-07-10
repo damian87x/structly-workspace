@@ -1,0 +1,18 @@
+{
+  "id": "1783430106-receipt-extraction-image",
+  "source": "local",
+  "title": "Receipt extraction: image to validated structured JSON",
+  "userStory": "As a user, after I confirm a receipt photo, Structly extracts vendor, date, net, VAT, gross and category into structured data with a validation check, so I can turn it into a spreadsheet.",
+  "acceptanceCriteria": [
+    "src/lib/extractReceipt.js exports an injectable extractReceipt(image, { client }) returning { fields, validation }, where client is a pluggable vision client (real by default, a fake injected in tests)",
+    "validation flags needs-review when net + vat does not equal gross within a small tolerance (VAT-math reconciliation)",
+    "fields normalizes date to ISO and amounts to numbers, flagging any missing or low-confidence field",
+    "scripts/verify-acceptance.js tests extractReceipt with a fake client covering a clean receipt, a VAT-mismatch receipt (flagged), and a missing-field receipt (flagged)",
+    "npm test passes and no real network call happens in tests",
+    "No Google or OAuth dependency is added"
+  ],
+  "tags": [
+    "backend",
+    "extraction"
+  ]
+}

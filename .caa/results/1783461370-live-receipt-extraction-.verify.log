@@ -1,0 +1,4 @@
+> structly@0.1.0 test
+> node scripts/verify-acceptance.js
+
+Acceptance checks passed.

@@ -1,0 +1,16 @@
+{
+  "id": "1783455877-show-extracted-receipt-f",
+  "source": "local",
+  "title": "Show extracted receipt fields after capture",
+  "userStory": "As a user, after I confirm a captured receipt, the app extracts and shows its fields (vendor, date, net, VAT, gross, category) and flags anything that needs review.",
+  "acceptanceCriteria": [
+    "After a receipt is confirmed in CaptureScreen, App.js runs extraction via the existing extractReceipt/processReceipts lib (injectable vision client) and renders the six fields.",
+    "When extraction marks the receipt needs-review (VAT mismatch or low confidence), the UI shows a clear needs-review indicator.",
+    "The capture-to-extract wiring lives in a testable helper (pure function or src/lib module) unit-testable without a React runtime; App.js calls it.",
+    "npm test passes: helper covered (clean receipt shows fields; flagged receipt surfaces needs-review) and App.js source asserts the fields render."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

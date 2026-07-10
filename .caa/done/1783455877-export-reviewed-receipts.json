@@ -1,0 +1,15 @@
+{
+  "id": "1783455877-export-reviewed-receipts",
+  "source": "local",
+  "title": "Export reviewed receipts to a shareable CSV",
+  "userStory": "As a user I can export my reviewed receipts as a CSV file and share it.",
+  "acceptanceCriteria": [
+    "App.js builds the sheet via buildReceiptSheet and shows a summary (row count + needs-review count) with an Export/Share button that calls exportShare.exportSheet (injectable writeFile/share).",
+    "The build-to-export wiring lives in a testable helper; App.js calls it and the button triggers it.",
+    "npm test passes: helper builds a sheet and calls export with the csv; App.js source renders the export button + summary."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

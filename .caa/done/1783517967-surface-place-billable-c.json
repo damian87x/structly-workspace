@@ -1,0 +1,15 @@
+{
+  "id": "1783517967-surface-place-billable-c",
+  "source": "local",
+  "title": "Surface place + billable client in review and export",
+  "userStory": "As a user I can see and export the place and billable client for each receipt.",
+  "acceptanceCriteria": [
+    "buildReceiptSheet gains always-present columns location and billable_client (blank string when no context), read from receipt.context.*; buildCsv updated to emit them. The existing golden-CSV assert.deepEqual in scripts/verify-acceptance.js is UPDATED to the new fixed schema (header + rows) - clean row = trailing empty cells; enriched row = place + client populated. Duplicate/needs-review behavior unchanged.",
+    "Review screen shows the captured place and matched billable client with a confirm/clear toggle; wiring extracted into a testable helper App.js calls.",
+    "npm test passes: new-schema CSV assertions (clean + enriched rows); App.js source asserts the place + billable UI renders."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "1783455877-review-and-inline-correc",
+  "source": "local",
+  "title": "Review and inline-correct flagged receipt fields",
+  "userStory": "As a user I can see receipts that need review and fix a wrong field so the row passes before export.",
+  "acceptanceCriteria": [
+    "App.js shows a review affordance for needs-review receipts and lets the user edit a field, applying reviewQueue.applyCorrection and re-validating.",
+    "After a correction that resolves the mismatch, the needs-review indicator clears in the UI state.",
+    "The correction/apply wiring lives in a testable helper; App.js calls it.",
+    "npm test passes: correction clears the flag, a still-invalid correction keeps it; App.js source wires applyCorrection."
+  ],
+  "tags": [
+    "frontend",
+    "integration"
+  ]
+}

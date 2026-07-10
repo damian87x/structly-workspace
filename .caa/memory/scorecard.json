@@ -1,0 +1,123 @@
+[
+  {
+    "tag": "expo",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "auth",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "frontend",
+    "model": "default",
+    "passes": 11,
+    "total": 11,
+    "steps": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  {
+    "tag": "capture",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "backend",
+    "model": "default",
+    "passes": 3,
+    "total": 3,
+    "steps": [
+      1,
+      1,
+      1
+    ]
+  },
+  {
+    "tag": "extraction",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "spreadsheet",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "data",
+    "model": "default",
+    "passes": 3,
+    "total": 3,
+    "steps": [
+      1,
+      1,
+      1
+    ]
+  },
+  {
+    "tag": "integration",
+    "model": "default",
+    "passes": 9,
+    "total": 9,
+    "steps": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  {
+    "tag": "export",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  },
+  {
+    "tag": "ai",
+    "model": "default",
+    "passes": 1,
+    "total": 1,
+    "steps": [
+      1
+    ]
+  }
+]

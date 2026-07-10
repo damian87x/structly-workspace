@@ -1,0 +1,14 @@
+{
+  "id": "1783517966-stamp-capturedat-on-ever",
+  "source": "local",
+  "title": "Stamp capturedAt on every captured receipt",
+  "userStory": "As the app, I record WHEN a receipt was captured so calendar matching can use it later.",
+  "acceptanceCriteria": [
+    "receiptCapture.takeReceiptPhoto stamps capturedAt via an INJECTED now() (default () => new Date().toISOString()); pickReceiptFromLibrary maps the picker asset's creationTime to capturedAt (null when absent).",
+    "normalizeReceipt threads capturedAt onto the returned receipt object (alongside the existing fileName/height/mimeType/source/uri/width).",
+    "npm test passes: camera receipt carries the injected ISO capturedAt; library receipt maps creationTime->capturedAt and null when absent; existing capture tests stay green."
+  ],
+  "tags": [
+    "frontend"
+  ]
+}

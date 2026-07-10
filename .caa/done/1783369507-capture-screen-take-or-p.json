@@ -1,0 +1,17 @@
+{
+  "id": "1783369507-capture-screen-take-or-p",
+  "source": "local",
+  "title": "Capture screen: take or pick a receipt photo with preview",
+  "userStory": "As a Structly user I want to take a photo or pick one from my library on the Capture screen and see a preview, so I can start turning receipts into a spreadsheet.",
+  "acceptanceCriteria": [
+    "Capture screen shows 'Take photo' and 'Pick from library' actions",
+    "Choosing an image shows a preview with a 'Use this receipt' confirm and a retake/change option",
+    "Image capture is behind an injectable, testable module in src/lib/ (like src/lib/supabaseAuth.js) covered by scripts/verify-acceptance.js",
+    "npm test passes",
+    "No Google/OAuth dependency is added (MVP constraint)"
+  ],
+  "tags": [
+    "frontend",
+    "capture"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "1783195667-scaffold-expo-app-skelet",
+  "source": "local",
+  "title": "Scaffold Expo app skeleton with email/password auth",
+  "userStory": "As a Structly user I want to install the app and sign in with email/password so I can reach the capture screen.",
+  "acceptanceCriteria": [
+    "npx expo start boots the app without errors",
+    "Navigation includes a Sign-In screen and a Capture home screen",
+    "Supabase email/password sign-in creates a session and routes to the Capture screen",
+    "No Google OAuth dependency is present in package.json"
+  ],
+  "tags": [
+    "expo",
+    "auth",
+    "frontend"
+  ]
+}

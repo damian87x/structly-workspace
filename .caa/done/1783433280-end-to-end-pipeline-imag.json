@@ -1,0 +1,16 @@
+{
+  "id": "1783433280-end-to-end-pipeline-imag",
+  "source": "local",
+  "title": "End-to-end pipeline: images to verified spreadsheet",
+  "userStory": "As a user, one call turns my captured receipts into a verified spreadsheet.",
+  "acceptanceCriteria": [
+    "src/lib/receiptPipeline.js exports processReceipts(images, { vision }) that extracts each image (reusing extractReceipt) then builds the sheet (reusing buildReceiptSheet).",
+    "Returns { sheet: { csv, validation }, receipts }; needs-review flags from extraction are reflected in the sheet validation.",
+    "A single extraction failure is collected (not thrown) so the rest of the batch still produces a sheet; failures are reported in the result.",
+    "npm test passes with a fake vision client over multiple images (one clean, one flagged, one failing)."
+  ],
+  "tags": [
+    "data",
+    "integration"
+  ]
+}

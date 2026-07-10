@@ -1,0 +1,18 @@
+{
+  "id": "1783461370-live-receipt-extraction-",
+  "source": "local",
+  "title": "Live receipt extraction via a real Claude vision client",
+  "userStory": "As a user, photographing a receipt extracts its real fields (vendor, date, net, VAT, gross, category) instead of relying on a fake client.",
+  "acceptanceCriteria": [
+    "New src/lib/claudeVisionClient.js exports createClaudeVisionClient({ apiKey, model, fetchImpl, readImageBase64 }) returning { async extractReceipt(image) } compatible with extractReceipt's injectable client contract (returns { fields, confidences }).",
+    "The client reads the image to base64 via an INJECTABLE readImageBase64(uri) (real default lazily requires expo-file-system so tests stay dep-free), then POSTs https://api.anthropic.com/v1/messages via fetch with headers x-api-key (from apiKey) and anthropic-version, a body containing the model, an image content block { type:image, source:{ type:base64, media_type, data } } and a text prompt instructing a STRICT JSON object with vendor/date/net/vat/gross/category plus a per-field confidence.",
+    "It parses the model's reply into { fields, confidences } — tolerant of the JSON being wrapped in prose or code fences (extract the first JSON object) — and throws a clear error on non-OK HTTP or unparseable output.",
+    "extractReceipt's getDefaultClient uses the Claude client when ANTHROPIC_API_KEY is set (the existing HTTP-endpoint client stays as the fallback). No user-facing copy names the provider (keep 'Claude'/'Anthropic' out of UI strings; env/comments/tests may use them).",
+    "npm test passes with an injected fake fetchImpl + fake readImageBase64 (NO real network — use the existing withNetworkBlocked pattern): assert the request shape (endpoint, x-api-key + anthropic-version headers, model, base64 image block, prompt) and that a canned Anthropic messages response parses into the normalized fields/confidences; assert a non-OK response throws."
+  ],
+  "tags": [
+    "backend",
+    "integration",
+    "ai"
+  ]
+}

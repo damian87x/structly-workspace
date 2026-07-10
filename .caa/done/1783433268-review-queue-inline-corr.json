@@ -1,0 +1,16 @@
+{
+  "id": "1783433268-review-queue-inline-corr",
+  "source": "local",
+  "title": "Review queue: inline-correct flagged rows",
+  "userStory": "As a user I can fix a flagged receipt field (e.g. wrong VAT) so the row passes validation before I export.",
+  "acceptanceCriteria": [
+    "src/lib/reviewQueue.js exports applyCorrection(rows, index, patch) that returns a NEW rows array with the patched fields and re-computed validation status (pure — never mutates input).",
+    "Correcting a flagged VAT so net+vat is approximately gross clears that row's needs-review flag; a correction that is still inconsistent keeps the flag with its reason.",
+    "An out-of-range index throws a clear error.",
+    "npm test passes with acceptance cases covering: correction clears a flag, correction still-invalid keeps flag, immutability of input, bad index throws."
+  ],
+  "tags": [
+    "frontend",
+    "data"
+  ]
+}
