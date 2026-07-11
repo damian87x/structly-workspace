@@ -138,8 +138,9 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 - Paths checked: deviceHeartbeat, status, **location** (coarse suggestion + trigger run), triggerDispatch, triggerActions, codeExecution, daytonaExecution (local mock), composio (signed webhook), schedule, mcp (local mock), workerHeartbeat.
 - Hosted deployment: not configured in this environment (`STRUCTLY_FUNCTIONS_URL` unset) — deployed `npm run test:live -- --require-live` remains open until a hosted project exists.
 
-### 2026-07-11 — Live model extraction one-shot: BLOCKED
+### 2026-07-11 — Live model extraction one-shot: PASS
 
-- BLOCKED: no provider key available in this environment (`OPENROUTER_API_KEY` preferred, `ANTHROPIC_API_KEY` fallback — neither in shell env nor `.env`).
-- Provider decision (2026-07-11): OpenRouter is the default extraction provider (`openRouterVisionClient`, `OPENROUTER_MODEL` override); the direct Anthropic client remains as fallback. Mobile builds must use the authenticated `extract-receipt` edge function so the key stays server-side (Phase 0 secret policy).
-- The extraction path stays proven against the injectable fake client only (`npm test`); run the one-shot with a real key when provided.
+- Provider: OpenRouter (`openRouterVisionClient`, default model `anthropic/claude-haiku-4.5`), key held server-side in `supabase/functions/.env` (gitignored; redacted `sk-or-v1-db99…4817`).
+- Input: rendered receipt image (SOHO MARKET LTD, 2026-07-10, net 15 / VAT 3 / gross 18, Meals).
+- Result: all six fields extracted exactly, VAT reconciliation clean — `{"needsReview": false, "issues": []}`.
+- Provider decision (2026-07-11): OpenRouter is the default extraction provider (`OPENROUTER_MODEL` override); the direct Anthropic client remains as fallback. Mobile builds must use the authenticated `extract-receipt` edge function so the key stays server-side (Phase 0 secret policy).
