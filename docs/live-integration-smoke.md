@@ -149,3 +149,8 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 
 - Full phone path against the local stack: demo sign-in → `POST /functions/v1/extract-receipt` (user JWT + apikey) → OpenRouter → 200 with all six fields exact and 0.99 confidences; key loaded server-side from `supabase/functions/.env`.
 - Stack fix required: newer CLI auth issues ES256 user tokens the local edge runtime cannot verify at the gateway, and worker/webhook functions never carry user JWTs — so `verify_jwt = false` is set per function in `supabase/config.toml`; every function keeps doing its own auth (`auth/v1/user` or dedicated tokens), which the edge E2E suite proves.
+
+### 2026-07-11 — Android dogfood APK: BUILT
+
+- EAS build fd4bddf8 (profile `preview`, LAN-pinned env per `docs/mobile-build-runbook.md`) finished with no errors; internal-distribution APK artifact on Expo.
+- Device install + on-phone capture→extract→suggestion loop is the next evidence step (then adb strict gates for Epic 8).
