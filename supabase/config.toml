@@ -382,3 +382,47 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+# Functions authenticate in-function (user JWT via auth/v1/user, or dedicated
+# worker/webhook tokens), so gateway-level JWT verification stays off — it
+# would reject worker tokens and signed webhooks, and the local edge runtime
+# cannot verify the ES256 tokens issued by newer CLI auth.
+
+[functions.code-execution-bridge]
+verify_jwt = false
+
+[functions.code-execution-runner]
+verify_jwt = false
+
+[functions.composio-webhook]
+verify_jwt = false
+
+[functions.extract-receipt]
+verify_jwt = false
+
+[functions.heartbeat-ingest]
+verify_jwt = false
+
+[functions.location-suggestions]
+verify_jwt = false
+
+[functions.mcp-bridge]
+verify_jwt = false
+
+[functions.mobile-sync]
+verify_jwt = false
+
+[functions.run-actions]
+verify_jwt = false
+
+[functions.schedule-jobs]
+verify_jwt = false
+
+[functions.status-read]
+verify_jwt = false
+
+[functions.trigger-actions]
+verify_jwt = false
+
+[functions.trigger-dispatch]
+verify_jwt = false

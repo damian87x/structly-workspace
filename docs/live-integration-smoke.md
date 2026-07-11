@@ -144,3 +144,8 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 - Input: rendered receipt image (SOHO MARKET LTD, 2026-07-10, net 15 / VAT 3 / gross 18, Meals).
 - Result: all six fields extracted exactly, VAT reconciliation clean — `{"needsReview": false, "issues": []}`.
 - Provider decision (2026-07-11): OpenRouter is the default extraction provider (`OPENROUTER_MODEL` override); the direct Anthropic client remains as fallback. Mobile builds must use the authenticated `extract-receipt` edge function so the key stays server-side (Phase 0 secret policy).
+
+### 2026-07-11 — Authenticated extract-receipt edge function: PASS
+
+- Full phone path against the local stack: demo sign-in → `POST /functions/v1/extract-receipt` (user JWT + apikey) → OpenRouter → 200 with all six fields exact and 0.99 confidences; key loaded server-side from `supabase/functions/.env`.
+- Stack fix required: newer CLI auth issues ES256 user tokens the local edge runtime cannot verify at the gateway, and worker/webhook functions never carry user JWTs — so `verify_jwt = false` is set per function in `supabase/config.toml`; every function keeps doing its own auth (`auth/v1/user` or dedicated tokens), which the edge E2E suite proves.
