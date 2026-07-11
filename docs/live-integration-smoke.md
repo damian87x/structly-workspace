@@ -140,5 +140,6 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 
 ### 2026-07-11 — Live model extraction one-shot: BLOCKED
 
-- BLOCKED: no `ANTHROPIC_API_KEY` available in this environment (not in shell env, not in `.env`).
-- The extraction path stays proven against the injectable fake client only (`npm test`); run the one-shot with a real key via `scratchpad/smoke-live-extract.js` when a key is provided.
+- BLOCKED: no provider key available in this environment (`OPENROUTER_API_KEY` preferred, `ANTHROPIC_API_KEY` fallback — neither in shell env nor `.env`).
+- Provider decision (2026-07-11): OpenRouter is the default extraction provider (`openRouterVisionClient`, `OPENROUTER_MODEL` override); the direct Anthropic client remains as fallback. Mobile builds must use the authenticated `extract-receipt` edge function so the key stays server-side (Phase 0 secret policy).
+- The extraction path stays proven against the injectable fake client only (`npm test`); run the one-shot with a real key when provided.

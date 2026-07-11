@@ -111,6 +111,9 @@ const {
   getSuggestionDisplayLabel,
 } = require("../src/lib/locationSuggestionFlow");
 const {
+  OPENROUTER_CHAT_COMPLETIONS_URL,
+} = require("../src/lib/openRouterVisionClient");
+const {
   hasComposioSignature,
   normalizeComposioEvent,
   validateComposioWebhookEnvelope,
@@ -735,6 +738,55 @@ async function verifyDefaultReceiptClientSelection() {
     assert.equal(
       JSON.parse(claudeCalls[0].options.body).messages[0].content[0].source.data,
       "base64-default-image",
+    );
+
+    const openRouterCalls = [];
+    const openRouterClient = getDefaultClient({
+      env: {
+        // Precedence: OpenRouter wins even when an Anthropic key is present.
+        ANTHROPIC_API_KEY: "anthropic-key",
+        OPENROUTER_API_KEY: "openrouter-key",
+        OPENROUTER_MODEL: "anthropic/receipt-model",
+      },
+      async fetchImpl(url, options) {
+        openRouterCalls.push({ options, url });
+
+        return {
+          ok: true,
+          async json() {
+            return {
+              choices: [
+                {
+                  message: {
+                    content: createReceiptJson("OpenRouter Market"),
+                    role: "assistant",
+                  },
+                },
+              ],
+            };
+          },
+        };
+      },
+      async readImageBase64(uri) {
+        assert.equal(uri, image.uri);
+        return "base64-openrouter-image";
+      },
+    });
+
+    const openRouterResult = await openRouterClient.extractReceipt(image);
+
+    assert.equal(openRouterResult.fields.vendor, "OpenRouter Market");
+    assert.equal(openRouterCalls.length, 1);
+    assert.equal(openRouterCalls[0].url, OPENROUTER_CHAT_COMPLETIONS_URL);
+    assert.equal(
+      openRouterCalls[0].options.headers.Authorization,
+      "Bearer openrouter-key",
+    );
+    const openRouterBody = JSON.parse(openRouterCalls[0].options.body);
+    assert.equal(openRouterBody.model, "anthropic/receipt-model");
+    assert.equal(
+      openRouterBody.messages[0].content[1].image_url.url,
+      "data:image/jpeg;base64,base64-openrouter-image",
     );
 
     const endpointCalls = [];
@@ -3951,6 +4003,19 @@ function verifySupabaseIntegrationSources() {
     fs.readFileSync("supabase/functions/code-execution-bridge/index.ts", "utf8"),
     /auth\/v1\/user[\s\S]*user_mismatch[\s\S]*DAYTONA_API_KEY[\s\S]*code_execution_requests[\s\S]*integration_events[\s\S]*trigger_runs/,
   );
+  const extractReceiptFnSource = fs.readFileSync(
+    "supabase/functions/extract-receipt/index.ts",
+    "utf8",
+  );
+  assert.match(
+    extractReceiptFnSource,
+    /auth\/v1\/user[\s\S]*OPENROUTER_API_KEY[\s\S]*extraction_not_configured/,
+  );
+  // The provider key stays server-side: read from Deno env only, never from
+  // the request body, and never echoed back in any response payload.
+  assert.match(extractReceiptFnSource, /Deno\.env\.get\("OPENROUTER_API_KEY"\)/);
+  assert.doesNotMatch(extractReceiptFnSource, /body[?.]*\.(apiKey|api_key|key)/);
+  assert.doesNotMatch(extractReceiptFnSource, /JSON\.stringify\([^)]*apiKey/);
   const codeRunnerSource = fs.readFileSync(
     "supabase/functions/code-execution-runner/index.ts",
     "utf8",

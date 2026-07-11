@@ -3,6 +3,7 @@ const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const REQUIRED_FIELDS = ["vendor", "date", "net", "vat", "gross", "category"];
 const VAT_TOLERANCE = 0.01;
 const { createClaudeVisionClient } = require("./claudeVisionClient");
+const { createOpenRouterVisionClient } = require("./openRouterVisionClient");
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -29,6 +30,15 @@ function getDefaultClient({
   fetchImpl,
   readImageBase64,
 } = {}) {
+  if (env.OPENROUTER_API_KEY) {
+    return createOpenRouterVisionClient({
+      apiKey: env.OPENROUTER_API_KEY,
+      fetchImpl,
+      model: env.OPENROUTER_MODEL || env.EXPO_PUBLIC_OPENROUTER_MODEL,
+      readImageBase64,
+    });
+  }
+
   if (env.ANTHROPIC_API_KEY) {
     return createClaudeVisionClient({
       apiKey: env.ANTHROPIC_API_KEY,

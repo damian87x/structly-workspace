@@ -157,9 +157,7 @@ function normalizeModelOutput(parsed) {
   };
 }
 
-function parseReceiptExtraction(message) {
-  const text = getResponseText(message);
-
+function parseReceiptText(text) {
   if (!text) {
     throw new Error("Receipt extraction response did not contain text output.");
   }
@@ -175,6 +173,10 @@ function parseReceiptExtraction(message) {
   } catch (error) {
     throw new Error("Receipt extraction response contained unparseable JSON.");
   }
+}
+
+function parseReceiptExtraction(message) {
+  return parseReceiptText(getResponseText(message));
 }
 
 function createClaudeVisionClient({
@@ -246,4 +248,8 @@ module.exports = {
   ANTHROPIC_VERSION,
   DEFAULT_MODEL,
   createClaudeVisionClient,
+  createPrompt,
+  defaultReadImageBase64,
+  normalizeMediaType,
+  parseReceiptText,
 };
