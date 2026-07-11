@@ -108,7 +108,7 @@ function verifyStaticE2EContracts() {
   assert.match(capabilitySource, /Schedule Jobs/);
   assert.match(capabilitySource, /Code Runs/);
   assert.match(appSource, /functionName: "location-suggestions"/);
-  assert.match(appSource, /createMobileLocationSuggestionPayload/);
+  assert.match(appSource, /buildEnrichedLocationSuggestion/);
   assert.match(appSource, /findLocationTrigger/);
   assert.match(appSource, /Schedule jobs:/);
   assert.match(appSource, /Location suggestions:/);

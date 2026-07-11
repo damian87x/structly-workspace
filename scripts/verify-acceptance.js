@@ -105,6 +105,12 @@ const {
   getSessionUserId,
 } = require("../src/lib/mobileIntegrationRuntime");
 const {
+  applyLocationSuggestionToReceipt,
+  buildEnrichedLocationSuggestion,
+  createLocationTriggerCreatePayload,
+  getSuggestionDisplayLabel,
+} = require("../src/lib/locationSuggestionFlow");
+const {
   hasComposioSignature,
   normalizeComposioEvent,
   validateComposioWebhookEnvelope,
@@ -237,13 +243,27 @@ function verifyScaffoldFiles() {
     appSource.includes('import { buildReviewReceipt } from "./src/lib/reviewReceipt";'),
   );
   assert.ok(
-    appSource.includes('import { enrichReceipt } from "./src/lib/enrichReceipt";'),
+    appSource.includes(
+      'import {\n  applyLocationSuggestionToReceipt,\n  buildEnrichedLocationSuggestion,\n  createLocationTriggerCreatePayload,\n  getSuggestionDisplayLabel,\n} from "./src/lib/locationSuggestionFlow";',
+    ),
   );
   assert.match(
     appSource,
-    /const receiptForReview = buildReviewReceipt\(result\.receipt, receipt\);[\s\S]*setReviewedReceipts\(\[receiptForReview\]\);[\s\S]*setConfirmedReceipt\(true\);[\s\S]*void enrichReceipt\(receiptForReview\)/,
+    /const receiptForReview = buildReviewReceipt\(result\.receipt, receipt\);[\s\S]*setReviewedReceipts\(\[receiptForReview\]\);[\s\S]*setConfirmedReceipt\(true\);[\s\S]*void buildEnrichedLocationSuggestion\(/,
   );
   assert.doesNotMatch(appSource, /await enrichReceipt/);
+  // Exactly one suggestion post site, built only after enrichment resolves:
+  // two posts with different placeIds would defeat the location-suggestions
+  // idempotency key (deviceId:placeId:observedAt) and duplicate suggestions.
+  assert.equal(
+    appSource.match(/functionName: "location-suggestions"/g).length,
+    1,
+  );
+  assert.match(
+    appSource,
+    /\.then\(\(\{ enrichedReceipt, payload \}\) =>[\s\S]*if \(payload\) \{[\s\S]*functionName: "location-suggestions"/,
+  );
+  assert.doesNotMatch(appSource, /createMobileLocationSuggestionPayload/);
   assert.match(appSource, /function mergeEnrichedReceiptContext/);
   assert.match(appSource, /mergeReceiptContextSuggestion\(currentReceipt, enrichedReceipt\.context\)/);
   assert.match(appSource, /RECEIPT_FIELD_ROWS\.map/);
@@ -2888,6 +2908,173 @@ function verifyHeartbeatClassificationModule() {
   );
 }
 
+async function verifyLocationSuggestionFlowModule() {
+  const locationTrigger = {
+    id: "trigger-location",
+    source: "location:coarse",
+    status: "active",
+  };
+  const session = { user: { id: "user-1" } };
+  const capturedReceipt = {
+    source: "camera",
+    capturedAt: "2026-07-11T10:00:00.000Z",
+    context: {
+      location: {
+        latitude: 51.51239,
+        longitude: -0.09182,
+        placeName: null,
+        city: null,
+      },
+    },
+  };
+
+  const enriched = await buildEnrichedLocationSuggestion({
+    enrichOptions: {
+      events: [],
+      location: {
+        async reverseGeocodeAsync() {
+          return [{ name: "Soho Market", city: "London" }];
+        },
+      },
+    },
+    locationTrigger,
+    platform: "ios",
+    receipt: capturedReceipt,
+    session,
+  });
+
+  assert.equal(enriched.enrichedReceipt.context.location.placeName, "Soho Market");
+  assert.equal(enriched.payload.placeLabel, "Soho Market");
+  assert.equal(enriched.payload.placeId, "Soho Market");
+  assert.notEqual(enriched.payload.placeId, "receipt-capture");
+  assert.deepEqual(enriched.payload.coords, {
+    latitude: 51.51,
+    longitude: -0.09,
+  });
+  assert.equal(enriched.payload.observedAt, "2026-07-11T10:00:00.000Z");
+
+  const enrichFailed = await buildEnrichedLocationSuggestion({
+    enrich: async () => {
+      throw new Error("enrichment offline");
+    },
+    locationTrigger,
+    platform: "ios",
+    receipt: capturedReceipt,
+    session,
+  });
+
+  assert.equal(enrichFailed.enrichedReceipt, capturedReceipt);
+  assert.equal(enrichFailed.payload.placeLabel, null);
+  assert.equal(enrichFailed.payload.placeId, "receipt-capture");
+  assert.deepEqual(enrichFailed.payload.coords, {
+    latitude: 51.51,
+    longitude: -0.09,
+  });
+
+  const deniedAtCapture = {
+    source: "camera",
+    capturedAt: "2026-07-11T10:00:00.000Z",
+    context: {},
+  };
+  const resolvedAfterCapture = await buildEnrichedLocationSuggestion({
+    enrich: async (receipt) => ({
+      ...receipt,
+      context: {
+        ...receipt.context,
+        location: {
+          latitude: 40.71274,
+          longitude: -74.00597,
+          placeName: "Fulton Market",
+          city: "New York",
+        },
+      },
+    }),
+    locationTrigger,
+    platform: "ios",
+    receipt: deniedAtCapture,
+    session,
+  });
+
+  assert.equal(resolvedAfterCapture.payload.placeLabel, "Fulton Market");
+  assert.deepEqual(resolvedAfterCapture.payload.coords, {
+    latitude: 40.71,
+    longitude: -74.01,
+  });
+
+  const neverResolved = await buildEnrichedLocationSuggestion({
+    enrichOptions: {
+      events: [],
+      location: {
+        async reverseGeocodeAsync() {
+          return [];
+        },
+      },
+    },
+    locationTrigger,
+    platform: "ios",
+    receipt: deniedAtCapture,
+    session,
+  });
+
+  assert.equal(neverResolved.payload, null);
+
+  const createLocationTrigger = createLocationTriggerCreatePayload({
+    placeLabel: "  Soho Market  ",
+    userId: "user-1",
+  });
+
+  assert.equal(createLocationTrigger.action, "create");
+  assert.equal(createLocationTrigger.patch.source, "location:coarse");
+  assert.equal(createLocationTrigger.patch.type, "location_visit");
+  assert.equal(createLocationTrigger.patch.name, "Place reminder: Soho Market");
+  assert.equal(createLocationTrigger.patch.userId, "user-1");
+  assert.equal(
+    createLocationTriggerCreatePayload({ placeLabel: "   ", userId: "user-1" }),
+    null,
+  );
+  assert.equal(
+    createLocationTriggerCreatePayload({ placeLabel: "Soho Market" }),
+    null,
+  );
+
+  const syncedSuggestion = {
+    eventKey: "device-1:Soho Market:location_visit:2026-07-11T10:00:00.000Z",
+    payload: {
+      coarseLocation: { accuracy: "coarse", latitude: 51.51, longitude: -0.09 },
+      placeId: "Soho Market",
+      placeLabel: "Soho Market",
+    },
+    suggestion: { copy: "Nearby receipts may need review." },
+  };
+
+  assert.equal(getSuggestionDisplayLabel(syncedSuggestion), "Soho Market");
+  assert.equal(getSuggestionDisplayLabel({}), "Nearby place");
+
+  const reviewedRows = [{ fields: { vendor: "Cafe" }, context: {} }];
+  const appliedRows = applyLocationSuggestionToReceipt(
+    reviewedRows,
+    0,
+    syncedSuggestion,
+  );
+
+  assert.notEqual(appliedRows, reviewedRows);
+  assert.deepEqual(appliedRows[0].context.location, {
+    accuracy: "coarse",
+    latitude: 51.51,
+    longitude: -0.09,
+    placeName: "Soho Market",
+    city: null,
+  });
+  assert.equal(
+    applyLocationSuggestionToReceipt(reviewedRows, 0, { payload: {} }),
+    reviewedRows,
+  );
+  assert.equal(
+    applyLocationSuggestionToReceipt([], 0, syncedSuggestion).length,
+    0,
+  );
+}
+
 function verifyTriggerLifecycleModule() {
   const trigger = createTriggerDefinition({
     id: "trigger-1",
@@ -3804,8 +3991,17 @@ function verifyIntegrationUiSource() {
   assert.match(appSource, /Approve/);
   assert.match(appSource, /Deny/);
   assert.match(appSource, /createMobileDeviceHeartbeatPayload/);
-  assert.match(appSource, /createMobileLocationSuggestionPayload/);
+  assert.match(appSource, /buildEnrichedLocationSuggestion/);
   assert.match(appSource, /findLocationTrigger/);
+  assert.match(appSource, /createLocationTriggerCreatePayload/);
+  assert.match(appSource, /Add place trigger/);
+  assert.match(appSource, /Apply to receipt/);
+  assert.match(appSource, /applyLocationSuggestionToReceipt/);
+  assert.match(appSource, /getSuggestionDisplayLabel\(suggestionEvent\)/);
+  // Location UX stays foreground/consent framed: no geofence or background
+  // monitoring promises in customer-facing copy.
+  assert.doesNotMatch(appSource, /geofence/i);
+  assert.doesNotMatch(appSource, /background location/i);
   assert.match(appSource, /shouldSendHeartbeat/);
   assert.match(appSource, /Location suggestion queued/);
   assert.match(appSource, /handleTriggerAction/);
@@ -4023,6 +4219,7 @@ async function main() {
   await verifyIntegrationBackendClientModule();
   verifyIntegrationCapabilityHealthModule();
   verifyHeartbeatClassificationModule();
+  await verifyLocationSuggestionFlowModule();
   verifyTriggerLifecycleModule();
   verifyScheduleLocationAndCodeModules();
   verifyIntegrationDashboardModule();

@@ -64,7 +64,7 @@ function createMobileLocationSuggestionPayload({
   userId,
 } = {}) {
   const location = getReceiptLocation(receipt);
-  const coarseLocation = createCoarseLocation(location);
+  const coarseLocation = createCoarseLocation(location || {});
   const resolvedUserId = getSessionUserId(session, userId);
 
   if (!locationTrigger?.id || !coarseLocation || !resolvedUserId) {

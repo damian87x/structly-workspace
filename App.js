@@ -26,7 +26,12 @@ import {
   RECEIPT_FIELD_ROWS,
   confirmReceiptExtraction,
 } from "./src/lib/confirmReceiptExtraction";
-import { enrichReceipt } from "./src/lib/enrichReceipt";
+import {
+  applyLocationSuggestionToReceipt,
+  buildEnrichedLocationSuggestion,
+  createLocationTriggerCreatePayload,
+  getSuggestionDisplayLabel,
+} from "./src/lib/locationSuggestionFlow";
 import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
 import { shouldSendHeartbeat } from "./src/lib/heartbeats";
 import {
@@ -39,7 +44,6 @@ import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
 import {
   createMobileDeviceHeartbeatPayload,
-  createMobileLocationSuggestionPayload,
   findLocationTrigger,
 } from "./src/lib/mobileIntegrationRuntime";
 import {
@@ -255,6 +259,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [isRunActionRunning, setIsRunActionRunning] = useState(false);
   const [isTriggerActionRunning, setIsTriggerActionRunning] = useState(false);
   const [locationSuggestionMessage, setLocationSuggestionMessage] = useState(null);
+  const [locationTriggerPlace, setLocationTriggerPlace] = useState("");
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
@@ -312,6 +317,8 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   );
   const integrationHealthRows = getHealthRows(integrationDashboard.health);
   const selectedTrigger = integrationDashboard.triggers[0] || null;
+  const canAddPlaceTrigger =
+    Boolean(locationTriggerPlace.trim()) && !isTriggerActionRunning;
   const needsReviewRow = receiptSheet.validation.needsReviewRows[0] || null;
   const reviewReceipt = needsReviewRow
     ? reviewedReceipts[needsReviewRow.index]
@@ -537,34 +544,17 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     try {
       const result = await confirmReceiptExtraction(receipt, { vision });
       const receiptForReview = buildReviewReceipt(result.receipt, receipt);
-      const locationSuggestionPayload = createMobileLocationSuggestionPayload({
+
+      setReviewedReceipts([receiptForReview]);
+      setConfirmedReceipt(true);
+      void buildEnrichedLocationSuggestion({
         locationTrigger: findLocationTrigger(integrationSync.triggerDefinitions),
         platform: Platform.OS,
         receipt: receiptForReview,
         session,
         userId: email,
-      });
-
-      setReviewedReceipts([receiptForReview]);
-      setConfirmedReceipt(true);
-      if (locationSuggestionPayload) {
-        void callIntegrationFunction({
-          anonKey,
-          body: locationSuggestionPayload,
-          config: backendConfig,
-          functionName: "location-suggestions",
-          session,
-        })
-          .then(({ error }) => {
-            if (!error) {
-              setLocationSuggestionMessage("Location suggestion queued.");
-              void refreshSyncedTriggers();
-            }
-          })
-          .catch(() => {});
-      }
-      void enrichReceipt(receiptForReview)
-        .then((enrichedReceipt) => {
+      })
+        .then(({ enrichedReceipt, payload }) => {
           setReviewedReceipts((currentRows) =>
             mergeEnrichedReceiptContext(
               currentRows,
@@ -572,6 +562,23 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
               enrichedReceipt,
             ),
           );
+
+          if (payload) {
+            void callIntegrationFunction({
+              anonKey,
+              body: payload,
+              config: backendConfig,
+              functionName: "location-suggestions",
+              session,
+            })
+              .then(({ error }) => {
+                if (!error) {
+                  setLocationSuggestionMessage("Location suggestion queued.");
+                  void refreshSyncedTriggers();
+                }
+              })
+              .catch(() => {});
+          }
         })
         .catch(() => {});
     } catch (error) {
@@ -588,6 +595,14 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
       currentRows.length > 0
         ? applyCorrection(currentRows, 0, { [field]: value })
         : currentRows,
+    );
+  }
+
+  function handleApplyLocationSuggestion(suggestionEvent) {
+    setExportError(null);
+    setExportResult(null);
+    setReviewedReceipts((currentRows) =>
+      applyLocationSuggestionToReceipt(currentRows, 0, suggestionEvent),
     );
   }
 
@@ -660,6 +675,13 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
         name: "Receipt follow-up",
         source: "backend_catalog",
         type: "receipt_reviewed",
+        userId: session?.user?.id || email,
+      });
+    }
+
+    if (action === "create-location") {
+      return createLocationTriggerCreatePayload({
+        placeLabel: locationTriggerPlace,
         userId: session?.user?.id || email,
       });
     }
@@ -862,6 +884,29 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           <Text style={styles.panelMeta}>
             Location suggestions: {integrationSync.locationSuggestions.length}
           </Text>
+          {integrationSync.locationSuggestions.map((suggestionEvent) => (
+            <View key={suggestionEvent.eventKey} style={styles.triggerRow}>
+              <Text style={styles.label}>
+                {getSuggestionDisplayLabel(suggestionEvent)}
+              </Text>
+              <Text style={styles.panelMeta}>
+                {suggestionEvent.suggestion?.copy ||
+                  "Review nearby receipt context."}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !confirmedReceipt }}
+                disabled={!confirmedReceipt}
+                onPress={() => handleApplyLocationSuggestion(suggestionEvent)}
+                style={[
+                  styles.smallButton,
+                  !confirmedReceipt ? styles.smallButtonDisabled : null,
+                ]}
+              >
+                <Text style={styles.smallButtonText}>Apply to receipt</Text>
+              </Pressable>
+            </View>
+          ))}
           <Text style={styles.panelMeta}>
             Code requests: {integrationSync.codeExecutionRequests.length}
           </Text>
@@ -907,6 +952,29 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
           {triggerActionError ? (
             <Text style={styles.error}>{triggerActionError}</Text>
           ) : null}
+          <Text style={styles.panelMeta}>
+            Remind me about receipts near a place
+          </Text>
+          <TextInput
+            accessibilityLabel="Place name"
+            autoCapitalize="words"
+            onChangeText={setLocationTriggerPlace}
+            placeholder="Place name (e.g. Soho Market)"
+            style={styles.input}
+            value={locationTriggerPlace}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canAddPlaceTrigger }}
+            disabled={!canAddPlaceTrigger}
+            onPress={() => handleTriggerAction("create-location")}
+            style={[
+              styles.smallButton,
+              !canAddPlaceTrigger ? styles.smallButtonDisabled : null,
+            ]}
+          >
+            <Text style={styles.smallButtonText}>Add place trigger</Text>
+          </Pressable>
           <Text style={styles.panelMeta}>Run history</Text>
           {integrationDashboard.runHistory.map((run) => (
             <View key={run.id} style={styles.runRow}>
