@@ -30,3 +30,9 @@ This plan covers the real-device checks that cannot be proven by the local Node 
 - Killed-app behavior is recorded instead of assumed.
 - Battery-saver behavior is recorded instead of assumed.
 - No mobile logs or bundle output contain provider API keys, service-role keys, or precise location payloads.
+
+## Recorded Results
+
+| Date | Device | Android version | Scenario | Outcome |
+|---|---|---|---|---|
+| 2026-07-11 | — | — | All device scenarios | BLOCKED: no adb installed / no Pixel device attached in this environment. Harness health verified via `npm run test:pixel -- --self-test` (parser self-test PASS). |

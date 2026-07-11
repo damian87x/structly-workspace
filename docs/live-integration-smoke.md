@@ -128,3 +128,17 @@ The MCP smoke expects an enabled `integration_sources` row for the test user wit
 - `composio-webhook` accepts a signed raw webhook body, persists the integration event, and queues a trigger run when a Structly trigger id is configured.
 - `schedule-jobs` accepts only the worker token and queues one idempotent schedule event when schedule env is configured.
 - `mcp-bridge` lists tools from an enabled user-owned MCP source, and optionally calls one approved tool when MCP tool env is configured.
+
+## Recorded Evidence
+
+### 2026-07-11 — Local Supabase smoke: PASS
+
+- Stack: local `supabase start` (Docker), migrations applied by the harness, throwaway trigger fixtures seeded.
+- Command: `npm run test:live:local` → exit 0, `"ok": true`.
+- Paths checked: deviceHeartbeat, status, **location** (coarse suggestion + trigger run), triggerDispatch, triggerActions, codeExecution, daytonaExecution (local mock), composio (signed webhook), schedule, mcp (local mock), workerHeartbeat.
+- Hosted deployment: not configured in this environment (`STRUCTLY_FUNCTIONS_URL` unset) — deployed `npm run test:live -- --require-live` remains open until a hosted project exists.
+
+### 2026-07-11 — Live model extraction one-shot: BLOCKED
+
+- BLOCKED: no `ANTHROPIC_API_KEY` available in this environment (not in shell env, not in `.env`).
+- The extraction path stays proven against the injectable fake client only (`npm test`); run the one-shot with a real key via `scratchpad/smoke-live-extract.js` when a key is provided.

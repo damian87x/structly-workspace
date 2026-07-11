@@ -2,6 +2,10 @@
 
 These epics are the post-MVP integration path for Structly. The MVP remains the verified receipt spreadsheet workflow in `docs/spec.md`; these epics define the gated backend/mobile work needed before connectors, triggers, schedules, location suggestions, MCP tools, or code execution become user-facing product surfaces.
 
+## Scope Decision (2026-07-11)
+
+**Epic 4 committed.** The operator explicitly requested the location-events product path ("we should create a mobile app that uses location events") and approved execution of the consensus plan (`docs/research/2026-07-11-structly-location-events-plan.md` in the workspace repo). Location suggestions proceed per Epic 4 constraints: coarse-only, consented, foreground-only. Epics 5–7 remain deferred at local-mock parity.
+
 Web evidence checked on 2026-07-09:
 
 - Composio trigger events are delivered to a public webhook and signed with `webhook-signature`, `webhook-id`, and `webhook-timestamp`; handlers must verify the raw body with `COMPOSIO_WEBHOOK_SECRET`.
@@ -55,6 +59,8 @@ Evidence gate:
 - Pixel matrix records closed-app behavior instead of assuming it.
 
 ## Epic 4 - Location Suggestions
+
+**Status (2026-07-11): code-complete; evidence-pending.** Local gates are met: coarse-rounding and no-`preciseLocation` E2E pass (`npm test`, `npm run test:e2e`), and the local Supabase live smoke proves suggestion + trigger-run creation (`npm run test:live:local`, recorded in `docs/live-integration-smoke.md`). Remaining evidence is BLOCKED on missing resources: deployed hosted smoke (`STRUCTLY_FUNCTIONS_URL` unset) and Pixel strict location-granted/denied runs (no adb/device — recorded in `docs/android-pixel-test-plan.md`). The gate stays open until both produce real evidence.
 
 Location is a consented, coarse suggestion input, not a continuous tracking product.
 
