@@ -11,4 +11,6 @@ iOS-first (React Native / Expo), Android fast-follow. No OAuth, no connectors, n
 
 ## Status
 
-Spec v4 under council re-review; no code yet.
+The MVP is built and passing its local gates: sign-in → receipt capture → structured extraction → review & inline correction → verified CSV export, implemented as an Expo/React Native app backed by injectable, fake-tested libraries in `src/lib/` (run `npm test`).
+
+Beyond the MVP, the integration path (worker health, automations, schedules, location suggestions) is code-complete behind evidence gates — see [`docs/integration-roadmap.md`](docs/integration-roadmap.md) and [`docs/mobile-integration-epics.md`](docs/mobile-integration-epics.md). Live-backend and real-device (Pixel) evidence are release gates and are recorded in `docs/live-integration-smoke.md` and `docs/android-pixel-test-plan.md`.
