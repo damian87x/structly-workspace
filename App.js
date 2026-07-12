@@ -253,6 +253,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [captureError, setCaptureError] = useState(null);
   const [confirmedReceipt, setConfirmedReceipt] = useState(false);
   const [exportError, setExportError] = useState(null);
+  const [exportFormat, setExportFormat] = useState("csv");
   const [exportResult, setExportResult] = useState(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -626,7 +627,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setIsExporting(true);
 
     try {
-      const result = await exportReviewedReceipts(reviewedReceipts);
+      const result = await exportReviewedReceipts(reviewedReceipts, {
+        format: exportFormat,
+      });
       setExportResult({
         ...result.exportResult,
         handoffNote: result.handoffNote,
@@ -824,6 +827,46 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
             </Text>
           ) : null}
           {email ? <Text style={styles.panelMeta}>Signed in as {email}</Text> : null}
+          <View style={styles.contextToggleRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: exportFormat === "csv" }}
+              onPress={() => setExportFormat("csv")}
+              style={({ pressed }) => [
+                styles.contextToggleButton,
+                exportFormat === "csv" ? styles.contextToggleButtonSelected : null,
+                pressed ? styles.contextToggleButtonPressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.contextToggleText,
+                  exportFormat === "csv" ? styles.contextToggleTextSelected : null,
+                ]}
+              >
+                CSV
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: exportFormat === "xlsx" }}
+              onPress={() => setExportFormat("xlsx")}
+              style={({ pressed }) => [
+                styles.contextToggleButton,
+                exportFormat === "xlsx" ? styles.contextToggleButtonSelected : null,
+                pressed ? styles.contextToggleButtonPressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.contextToggleText,
+                  exportFormat === "xlsx" ? styles.contextToggleTextSelected : null,
+                ]}
+              >
+                Excel spreadsheet (.xlsx)
+              </Text>
+            </Pressable>
+          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityState={{

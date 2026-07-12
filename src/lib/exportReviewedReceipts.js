@@ -1,4 +1,4 @@
-const { buildReceiptSheet } = require("./buildSpreadsheet");
+const { buildReceiptSheet, buildWorkbookBase64 } = require("./buildSpreadsheet");
 const exportShare = require("./exportShare");
 
 const DEFAULT_EXPORT_FILENAME = "reviewed-receipts";
@@ -96,17 +96,39 @@ async function exportReviewedReceipts(receipts, options = {}) {
   const sheet = buildReceiptSheet(receiptList);
   const summary = buildReceiptSummary(receiptList, sheet);
   const handoffNote = buildHandoffNote(receiptList, sheet);
+  const filename = options.filename || getDefaultExportFilename(summary);
+  const shareDependencies = {
+    directory: options.directory,
+    share: options.share,
+    writeFile: options.writeFile,
+  };
+
+  if (options.format === "xlsx") {
+    const base64 = buildWorkbookBase64(receiptList, { xlsx: options.xlsx });
+    const exportWorkbook = options.exportWorkbook || exportShare.exportWorkbook;
+    const exportResult = await exportWorkbook(
+      {
+        base64,
+        filename,
+      },
+      shareDependencies,
+    );
+
+    return {
+      exportResult,
+      handoffNote,
+      sheet,
+      summary,
+    };
+  }
+
   const exportSheet = options.exportSheet || exportShare.exportSheet;
   const exportResult = await exportSheet(
     {
       csv: sheet.csv,
-      filename: options.filename || getDefaultExportFilename(summary),
+      filename,
     },
-    {
-      directory: options.directory,
-      share: options.share,
-      writeFile: options.writeFile,
-    },
+    shareDependencies,
   );
 
   return {

@@ -1,5 +1,13 @@
 const DEFAULT_EXPORT_DIRECTORY = "file:///tmp/structly-exports/";
 const DEFAULT_FILENAME = "receipts.csv";
+const CSV_EXTENSION = ".csv";
+const XLSX_EXTENSION = ".xlsx";
+const CSV_MIME_TYPE = "text/csv";
+const XLSX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const CSV_UTI = "public.comma-separated-values-text";
+const ENCODING_UTF8 = "utf8";
+const ENCODING_BASE64 = "base64";
 
 function getDefaultFileSystem() {
   return require("expo-file-system");
@@ -26,9 +34,14 @@ function getDefaultExportDirectory(fileSystem) {
 }
 
 function createDefaultWriteFile(fileSystem) {
-  return async function writeCsvFile(uri, contents) {
+  return async function writeFile(uri, contents, options = {}) {
+    const encoding =
+      options.encoding ||
+      fileSystem.EncodingType?.UTF8 ||
+      ENCODING_UTF8;
+
     await fileSystem.writeAsStringAsync(uri, contents, {
-      encoding: fileSystem.EncodingType?.UTF8 || "utf8",
+      encoding,
     });
   };
 }
@@ -36,11 +49,16 @@ function createDefaultWriteFile(fileSystem) {
 function createDefaultShare() {
   const Sharing = getDefaultSharing();
 
-  return async function shareCsvFile(uri) {
-    await Sharing.shareAsync(uri, {
-      mimeType: "text/csv",
-      UTI: "public.comma-separated-values-text",
-    });
+  return async function share(uri, options = {}) {
+    const shareOptions = {
+      mimeType: options.mimeType || CSV_MIME_TYPE,
+    };
+
+    if (options.uti) {
+      shareOptions.UTI = options.uti;
+    }
+
+    await Sharing.shareAsync(uri, shareOptions);
   };
 }
 
@@ -60,14 +78,22 @@ function getCleanFilenameSegment(filename) {
     .trim();
 }
 
-function sanitizeFilename(filename) {
-  const baseName = getCleanFilenameSegment(filename) || DEFAULT_FILENAME;
+function sanitizeFilename(filename, extension = CSV_EXTENSION) {
+  const normalizedExtension =
+    typeof extension === "string" && extension.startsWith(".")
+      ? extension.toLowerCase()
+      : `.${String(extension || CSV_EXTENSION).replace(/^\./, "").toLowerCase() || "csv"}`;
+  const defaultName =
+    normalizedExtension === XLSX_EXTENSION ? "receipts.xlsx" : DEFAULT_FILENAME;
+  const baseName = getCleanFilenameSegment(filename) || defaultName;
+  const escapedExtension = normalizedExtension.replace(/\./g, "\\.");
+  const extensionPattern = new RegExp(`${escapedExtension}$`, "i");
 
-  if (/\.csv$/i.test(baseName)) {
-    return baseName.replace(/\.csv$/i, ".csv");
+  if (extensionPattern.test(baseName)) {
+    return baseName.replace(extensionPattern, normalizedExtension);
   }
 
-  return `${baseName}.csv`;
+  return `${baseName}${normalizedExtension}`;
 }
 
 function assertExportableCsv(csv) {
@@ -76,9 +102,16 @@ function assertExportableCsv(csv) {
   }
 }
 
-async function exportSheet({ csv, filename } = {}, dependencies = {}) {
-  assertExportableCsv(csv);
+function assertExportableBase64(base64) {
+  if (typeof base64 !== "string" || !base64.trim()) {
+    throw new Error("Workbook content is required to export a sheet.");
+  }
+}
 
+async function exportFile(
+  { content, encoding, mimeType, uti, filename, extension } = {},
+  dependencies = {},
+) {
   const hasInjectedWriteFile = typeof dependencies.writeFile === "function";
   const hasInjectedShare = typeof dependencies.share === "function";
   const fileSystem =
@@ -90,14 +123,46 @@ async function exportSheet({ csv, filename } = {}, dependencies = {}) {
   const directory = dependencies.directory
     ? normalizeDirectory(dependencies.directory)
     : getDefaultExportDirectory(fileSystem);
-  const uri = `${directory}${sanitizeFilename(filename)}`;
+  const uri = `${directory}${sanitizeFilename(filename, extension)}`;
 
-  await writeFile(uri, csv);
-  await share(uri);
+  await writeFile(uri, content, { encoding });
+  await share(uri, { mimeType, uti });
 
   return { uri, shared: true };
 }
 
+async function exportSheet({ csv, filename } = {}, dependencies = {}) {
+  assertExportableCsv(csv);
+
+  return exportFile(
+    {
+      content: csv,
+      encoding: ENCODING_UTF8,
+      extension: CSV_EXTENSION,
+      filename,
+      mimeType: CSV_MIME_TYPE,
+      uti: CSV_UTI,
+    },
+    dependencies,
+  );
+}
+
+async function exportWorkbook({ base64, filename } = {}, dependencies = {}) {
+  assertExportableBase64(base64);
+
+  return exportFile(
+    {
+      content: base64,
+      encoding: ENCODING_BASE64,
+      extension: XLSX_EXTENSION,
+      filename,
+      mimeType: XLSX_MIME_TYPE,
+    },
+    dependencies,
+  );
+}
+
 module.exports = {
   exportSheet,
+  exportWorkbook,
 };

@@ -1,5 +1,6 @@
 const assert = require("assert");
 const fs = require("fs");
+const XLSX = require("xlsx");
 
 const {
   getSupabaseConfig,
@@ -11,7 +12,10 @@ const {
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
 const { buildReviewReceipt } = require("../src/lib/reviewReceipt");
-const { buildReceiptSheet } = require("../src/lib/buildSpreadsheet");
+const {
+  buildReceiptSheet,
+  buildWorkbookBase64,
+} = require("../src/lib/buildSpreadsheet");
 const {
   RECEIPT_FIELD_ROWS,
   confirmReceiptExtraction,
@@ -24,7 +28,7 @@ const {
   buildHandoffNote,
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
-const { exportSheet } = require("../src/lib/exportShare");
+const { exportSheet, exportWorkbook } = require("../src/lib/exportShare");
 const {
   extractReceipt,
   getDefaultClient,
@@ -274,6 +278,12 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /fieldRow\.displayValue/);
   assert.match(appSource, /Extracting receipt fields/);
   assert.match(appSource, /exportReviewedReceipts/);
+  assert.match(appSource, /const \[exportFormat, setExportFormat\] = useState\("csv"\)/);
+  assert.match(appSource, /setExportFormat\("csv"\)/);
+  assert.match(appSource, /setExportFormat\("xlsx"\)/);
+  assert.match(appSource, /CSV/);
+  assert.match(appSource, /Excel spreadsheet \(\.xlsx\)/);
+  assert.match(appSource, /format: exportFormat/);
   assert.match(appSource, /Accountant handoff/);
   assert.match(appSource, /handoffNote/);
   assert.ok(
@@ -1595,6 +1605,474 @@ async function verifyExportReviewedReceiptsHelper() {
     csv: expectedCsv,
     filename: "reviewed-receipts-2026-07",
   });
+}
+
+async function verifyWorkbookExport() {
+  const EXPECTED_COLUMNS = [
+    "vendor",
+    "date",
+    "net",
+    "vat",
+    "gross",
+    "category",
+    "location",
+    "billable_client",
+    "business_purpose",
+    "payment_method",
+    "source_uri",
+    "review_status",
+    "review_reasons",
+  ];
+  const NUMERIC_COLUMNS = new Set(["net", "vat", "gross"]);
+
+  // CSV-model formatCellValue / parseAmount / toWorkbookCellValue semantics
+  // (mirrors src/lib/buildSpreadsheet.js) for full-matrix expected values.
+  function formatCellValue(value) {
+    if (value === null || value === undefined) {
+      return "";
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? String(value) : "";
+    }
+    return String(value);
+  }
+
+  function parseAmount(value) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const normalized = String(value).trim().replace(/[£$€,\s]/g, "");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function normalizeKeyPart(value) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? String(value) : null;
+    }
+    const normalized = String(value).trim();
+    return normalized ? normalized : null;
+  }
+
+  function expectedWorkbookCell(column, rawValue) {
+    if (NUMERIC_COLUMNS.has(column)) {
+      if (formatCellValue(rawValue).trim() === "") {
+        return undefined;
+      }
+      const amount = parseAmount(rawValue);
+      if (amount !== null) {
+        return amount;
+      }
+      return formatCellValue(rawValue);
+    }
+    const formatted = formatCellValue(rawValue);
+    return formatted === "" ? undefined : formatted;
+  }
+
+  function rawRowValuesFromFixture(receipt) {
+    const fields = receipt.fields || {};
+    const context =
+      receipt.context && typeof receipt.context === "object"
+        ? receipt.context
+        : {};
+    const billable = context.billable;
+    const billableClient =
+      billable?.billable === true ? billable?.client : null;
+    const location = context.location?.placeName;
+    const billableClientText = normalizeKeyPart(billable?.client);
+    const billableProjectText = normalizeKeyPart(billable?.project);
+    let businessPurpose = null;
+    if (
+      billable?.billable === true &&
+      (billableClientText || billableProjectText)
+    ) {
+      businessPurpose = [billableClientText, billableProjectText]
+        .filter(Boolean)
+        .join(" - ");
+    }
+    const paymentMethod = normalizeKeyPart(
+      fields.paymentMethod ||
+        fields.payment_method ||
+        context.paymentMethod ||
+        context.payment_method ||
+        receipt.paymentMethod,
+    );
+    const issues = Array.isArray(receipt.validation?.issues)
+      ? receipt.validation.issues
+      : [];
+    const needsReview =
+      Boolean(receipt.validation?.needsReview) || issues.length > 0;
+    const reviewReasons = issues
+      .map((issue) => {
+        if (
+          issue &&
+          typeof issue.message === "string" &&
+          issue.message.trim()
+        ) {
+          return issue.message;
+        }
+        if (issue && typeof issue.type === "string" && issue.type.trim()) {
+          return issue.type;
+        }
+        return "Needs review.";
+      })
+      .join("; ");
+
+    return {
+      vendor: fields.vendor,
+      date: fields.date,
+      net: fields.net,
+      vat: fields.vat,
+      gross: fields.gross,
+      category: fields.category,
+      location,
+      billable_client: billableClient,
+      business_purpose: businessPurpose,
+      payment_method: paymentMethod,
+      source_uri: receipt.sourceUri || receipt.imageUri || receipt.uri || null,
+      review_status: needsReview ? "needs_review" : "ready",
+      review_reasons: reviewReasons,
+    };
+  }
+
+  const fixtures = [
+    {
+      sourceUri: "file://money-matrix.jpg",
+      fields: {
+        category: "Office",
+        date: "2026-07-01",
+        gross: 12.34,
+        net: "12.34",
+        vat: "abc",
+        vendor: "Money Matrix",
+      },
+      context: {
+        billable: {
+          billable: true,
+          client: "Acme Ltd",
+          project: "VAT review",
+        },
+        location: {
+          placeName: "Soho Market",
+        },
+        paymentMethod: "Business card",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      sourceUri: "file://blank-money.jpg",
+      fields: {
+        category: "Travel",
+        date: "2026-07-02",
+        gross: "",
+        net: null,
+        vat: "   ",
+        vendor: "Blank Money",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+    {
+      sourceUri: "file://undefined-net.jpg",
+      fields: {
+        category: "Meals",
+        date: "2026-07-03",
+        gross: undefined,
+        vendor: "Undefined Net",
+      },
+      validation: {
+        issues: [
+          {
+            message: "missing amounts.",
+            type: "missing-amount",
+          },
+        ],
+        needsReview: true,
+      },
+    },
+    // Parseable VAT numeric typing (AC1) — keep "abc" unparseable case above.
+    {
+      sourceUri: "file://parseable-vat.jpg",
+      fields: {
+        category: "Supplies",
+        date: "2026-07-04",
+        gross: "107.50",
+        net: "100.00",
+        vat: "7.50",
+        vendor: "Parseable VAT Co",
+      },
+      validation: {
+        issues: [],
+        needsReview: false,
+      },
+    },
+  ];
+
+  const expectedMatrix = fixtures.map((receipt) => {
+    const raw = rawRowValuesFromFixture(receipt);
+    return EXPECTED_COLUMNS.map((column) =>
+      expectedWorkbookCell(column, raw[column]),
+    );
+  });
+
+  const base64 = buildWorkbookBase64(fixtures);
+  assert.equal(typeof base64, "string");
+  assert.ok(base64.length > 0);
+
+  const workbook = XLSX.read(base64, { type: "base64" });
+  assert.deepEqual(workbook.SheetNames, ["Receipts"]);
+  const worksheet = workbook.Sheets.Receipts;
+
+  for (let columnIndex = 0; columnIndex < EXPECTED_COLUMNS.length; columnIndex += 1) {
+    const address = XLSX.utils.encode_cell({ r: 0, c: columnIndex });
+    assert.equal(worksheet[address].v, EXPECTED_COLUMNS[columnIndex]);
+  }
+
+  // Full matrix: every data cell vs CSV-model expectation (all rows × 13 cols).
+  for (let rowIndex = 0; rowIndex < expectedMatrix.length; rowIndex += 1) {
+    for (
+      let columnIndex = 0;
+      columnIndex < EXPECTED_COLUMNS.length;
+      columnIndex += 1
+    ) {
+      const address = XLSX.utils.encode_cell({
+        r: rowIndex + 1,
+        c: columnIndex,
+      });
+      const cell = worksheet[address];
+      const expected = expectedMatrix[rowIndex][columnIndex];
+      const label = `${address} (${EXPECTED_COLUMNS[columnIndex]})`;
+
+      if (expected === undefined) {
+        assert.equal(cell, undefined, `${label} should be absent`);
+      } else if (typeof expected === "number") {
+        assert.ok(cell, `${label} should exist for numeric value`);
+        assert.equal(cell.t, "n", `${label} should be numeric type`);
+        assert.equal(cell.v, expected, `${label} numeric value`);
+        assert.equal(typeof cell.v, "number", `${label} typeof number`);
+      } else {
+        assert.ok(cell, `${label} should exist for string value`);
+        assert.equal(cell.v, expected, `${label} string value`);
+      }
+    }
+  }
+
+  // Explicit legacy anchors (same facts as matrix; keep for regression clarity).
+  // Row 1: parseable string net, number gross, unparseable vat string, full context.
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 0 })].v, "Money Matrix");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 1 })].v, "2026-07-01");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 2 })].v, 12.34);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 2 })].t, "n");
+  assert.equal(typeof worksheet[XLSX.utils.encode_cell({ r: 1, c: 2 })].v, "number");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 3 })].v, "abc");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 3 })].t, "s");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 4 })].v, 12.34);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 4 })].t, "n");
+  assert.equal(typeof worksheet[XLSX.utils.encode_cell({ r: 1, c: 4 })].v, "number");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 5 })].v, "Office");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 6 })].v, "Soho Market");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 7 })].v, "Acme Ltd");
+  assert.equal(
+    worksheet[XLSX.utils.encode_cell({ r: 1, c: 8 })].v,
+    "Acme Ltd - VAT review",
+  );
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 9 })].v, "Business card");
+  assert.equal(
+    worksheet[XLSX.utils.encode_cell({ r: 1, c: 10 })].v,
+    "file://money-matrix.jpg",
+  );
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 11 })].v, "ready");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 1, c: 12 })], undefined);
+
+  // Row 2: blank money matrix — null net, whitespace vat, empty gross.
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 2, c: 0 })].v, "Blank Money");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 2, c: 2 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 2, c: 3 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 2, c: 4 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 2, c: 11 })].v, "ready");
+
+  // Row 3: undefined money + needs_review.
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 0 })].v, "Undefined Net");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 2 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 3 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 4 })], undefined);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 11 })].v, "needs_review");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 3, c: 12 })].v, "missing amounts.");
+
+  // Row 4: parseable vat typed numeric (t === "n", v === 7.5).
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 0 })].v, "Parseable VAT Co");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 2 })].v, 100);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 2 })].t, "n");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 3 })].v, 7.5);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 3 })].t, "n");
+  assert.equal(typeof worksheet[XLSX.utils.encode_cell({ r: 4, c: 3 })].v, "number");
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 4 })].v, 107.5);
+  assert.equal(worksheet[XLSX.utils.encode_cell({ r: 4, c: 4 })].t, "n");
+
+  const buildSpreadsheetSource = fs.readFileSync(
+    "src/lib/buildSpreadsheet.js",
+    "utf8",
+  );
+  assert.match(buildSpreadsheetSource, /return require\("xlsx"\)/);
+  const requireXlsxMatches = buildSpreadsheetSource.match(/require\("xlsx"\)/g) || [];
+  assert.equal(requireXlsxMatches.length, 1);
+  assert.doesNotMatch(
+    buildSpreadsheetSource.replace(
+      /function getDefaultXlsx\(\)\s*\{\s*return require\("xlsx"\);\s*\}/,
+      "",
+    ),
+    /require\("xlsx"\)/,
+  );
+
+  const workbookWrites = [];
+  const workbookShares = [];
+  const workbookBase64 = "dGVzdC14bHN4LWJhc2U2NA==";
+  const workbookResult = await exportWorkbook(
+    {
+      base64: workbookBase64,
+      filename: "../exports/monthly-receipts",
+    },
+    {
+      async share(uri, options) {
+        workbookShares.push({ options, uri });
+      },
+      async writeFile(uri, contents, options) {
+        workbookWrites.push({ contents, options, uri });
+      },
+    },
+  );
+  const expectedWorkbookUri =
+    "file:///tmp/structly-exports/monthly-receipts.xlsx";
+
+  assert.deepEqual(workbookWrites, [
+    {
+      contents: workbookBase64,
+      options: { encoding: "base64" },
+      uri: expectedWorkbookUri,
+    },
+  ]);
+  assert.deepEqual(workbookShares, [
+    {
+      options: {
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        uti: undefined,
+      },
+      uri: expectedWorkbookUri,
+    },
+  ]);
+  assert.deepEqual(workbookResult, {
+    shared: true,
+    uri: expectedWorkbookUri,
+  });
+
+  const csvWrites = [];
+  const csvShares = [];
+  const csvContent = "vendor,date\nAcme Supplies,2026-07-01";
+  await exportSheet(
+    {
+      csv: csvContent,
+      filename: "csv-regression",
+    },
+    {
+      async share(uri, options) {
+        csvShares.push({ options, uri });
+      },
+      async writeFile(uri, contents, options) {
+        csvWrites.push({ contents, options, uri });
+      },
+    },
+  );
+  assert.deepEqual(csvWrites, [
+    {
+      contents: csvContent,
+      options: { encoding: "utf8" },
+      uri: "file:///tmp/structly-exports/csv-regression.csv",
+    },
+  ]);
+  assert.deepEqual(csvShares, [
+    {
+      options: {
+        mimeType: "text/csv",
+        uti: "public.comma-separated-values-text",
+      },
+      uri: "file:///tmp/structly-exports/csv-regression.csv",
+    },
+  ]);
+
+  const xlsxExportWrites = [];
+  const xlsxExportShares = [];
+  const xlsxExportResult = await exportReviewedReceipts(fixtures, {
+    filename: "reviewed-pack",
+    format: "xlsx",
+    async share(uri, options) {
+      xlsxExportShares.push({ options, uri });
+    },
+    async writeFile(uri, contents, options) {
+      xlsxExportWrites.push({ contents, options, uri });
+    },
+  });
+  assert.equal(xlsxExportWrites.length, 1);
+  assert.equal(
+    xlsxExportWrites[0].uri,
+    "file:///tmp/structly-exports/reviewed-pack.xlsx",
+  );
+  assert.equal(xlsxExportWrites[0].options.encoding, "base64");
+  assert.equal(typeof xlsxExportWrites[0].contents, "string");
+  assert.ok(xlsxExportWrites[0].contents.length > 0);
+  const roundTripped = XLSX.read(xlsxExportWrites[0].contents, {
+    type: "base64",
+  });
+  assert.deepEqual(roundTripped.SheetNames, ["Receipts"]);
+  assert.equal(
+    xlsxExportShares[0].options.mimeType,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  assert.equal(
+    xlsxExportResult.exportResult.uri,
+    "file:///tmp/structly-exports/reviewed-pack.xlsx",
+  );
+  assert.equal(typeof xlsxExportResult.handoffNote, "string");
+  assert.ok(xlsxExportResult.sheet.csv.includes("Money Matrix"));
+
+  const defaultCsvWrites = [];
+  await exportReviewedReceipts(fixtures, {
+    filename: "default-format",
+    async writeFile(uri, contents, options) {
+      defaultCsvWrites.push({ contents, options, uri });
+    },
+    async share() {},
+  });
+  assert.equal(defaultCsvWrites.length, 1);
+  assert.equal(
+    defaultCsvWrites[0].uri,
+    "file:///tmp/structly-exports/default-format.csv",
+  );
+  assert.equal(defaultCsvWrites[0].options.encoding, "utf8");
+  assert.match(defaultCsvWrites[0].contents, /^vendor,date,net,vat,gross/);
+  assert.match(defaultCsvWrites[0].contents, /Money Matrix/);
+
+  const appSource = fs.readFileSync("App.js", "utf8");
+  assert.match(
+    appSource,
+    /const \[exportFormat, setExportFormat\] = useState\("csv"\)/,
+  );
+  assert.match(appSource, /setExportFormat\("csv"\)/);
+  assert.match(appSource, /setExportFormat\("xlsx"\)/);
+  assert.match(appSource, /CSV/);
+  assert.match(appSource, /Excel spreadsheet \(\.xlsx\)/);
+  assert.match(appSource, /format: exportFormat/);
 }
 
 function createReviewRow(overrides = {}) {
@@ -4271,6 +4749,7 @@ async function main() {
   await verifyReceiptExtractionModule();
   await verifyConfirmReceiptExtractionHelper();
   verifyBuildSpreadsheetModule();
+  await verifyWorkbookExport();
   await verifyExportShareModule();
   await verifyExportReviewedReceiptsHelper();
   verifyReviewQueueCorrections();

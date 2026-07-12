@@ -8,12 +8,17 @@ const COLUMNS = [
   ...REPORT_COLUMNS,
   ...AUDIT_COLUMNS,
 ];
+const NUMERIC_COLUMNS = new Set(["net", "vat", "gross"]);
 const HEADER_ROW = COLUMNS.join(",");
 const READY_STATUS = {
   EMPTY: "empty",
   NEEDS_REVIEW: "needs_review",
   READY: "ready",
 };
+
+function getDefaultXlsx() {
+  return require("xlsx");
+}
 
 function formatCellValue(value) {
   if (value === null || value === undefined) {
@@ -478,6 +483,68 @@ function buildCsv(receipts) {
   return [HEADER_ROW, ...rows].join("\n");
 }
 
+function getRowValues(receipt) {
+  const fields = getFields(receipt);
+  const contextFields = getContextFields(receipt);
+  const reportFields = {
+    business_purpose: getBusinessPurpose(receipt),
+    payment_method: getPaymentMethod(receipt),
+  };
+  const issues = getIssues(receipt);
+  const needsReview =
+    Boolean(receipt?.validation?.needsReview) || issues.length > 0;
+  const auditFields = {
+    review_reasons: issues.map(getIssueReason).join("; "),
+    review_status: needsReview ? "needs_review" : "ready",
+    source_uri: getSourceUri(receipt),
+  };
+
+  return [
+    ...FIELD_COLUMNS.map((field) => fields[field]),
+    ...CONTEXT_COLUMNS.map((field) => contextFields[field]),
+    ...REPORT_COLUMNS.map((field) => reportFields[field]),
+    ...AUDIT_COLUMNS.map((field) => auditFields[field]),
+  ];
+}
+
+function toWorkbookCellValue(column, value) {
+  if (NUMERIC_COLUMNS.has(column)) {
+    if (formatCellValue(value).trim() === "") {
+      return undefined;
+    }
+
+    const amount = parseAmount(value);
+
+    if (amount !== null) {
+      return amount;
+    }
+
+    return formatCellValue(value);
+  }
+
+  const formatted = formatCellValue(value);
+
+  return formatted === "" ? undefined : formatted;
+}
+
+function buildWorkbookBase64(receipts, dependencies = {}) {
+  const xlsx = dependencies.xlsx || getDefaultXlsx();
+  const receiptList = Array.isArray(receipts) ? receipts : [];
+  const rows = receiptList.map((receipt) => {
+    const values = getRowValues(receipt);
+
+    return COLUMNS.map((column, index) =>
+      toWorkbookCellValue(column, values[index]),
+    );
+  });
+  const worksheet = xlsx.utils.aoa_to_sheet([[...COLUMNS], ...rows]);
+  const workbook = xlsx.utils.book_new();
+
+  xlsx.utils.book_append_sheet(workbook, worksheet, "Receipts");
+
+  return xlsx.write(workbook, { type: "base64", bookType: "xlsx" });
+}
+
 function buildReceiptSheet(receipts) {
   const receiptList = Array.isArray(receipts) ? receipts : [];
   const needsReviewRows = buildNeedsReviewRows(receiptList);
@@ -501,4 +568,5 @@ function buildReceiptSheet(receipts) {
 
 module.exports = {
   buildReceiptSheet,
+  buildWorkbookBase64,
 };
