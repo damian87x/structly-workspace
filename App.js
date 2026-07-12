@@ -22,10 +22,8 @@ import {
   getIntegrationBackendConfig,
 } from "./src/lib/integrationBackend";
 import { buildReceiptSheet } from "./src/lib/buildSpreadsheet";
-import {
-  RECEIPT_FIELD_ROWS,
-  confirmReceiptExtraction,
-} from "./src/lib/confirmReceiptExtraction";
+import { attemptReceiptExtraction } from "./src/lib/attemptReceiptExtraction";
+import { RECEIPT_FIELD_ROWS } from "./src/lib/confirmReceiptExtraction";
 import {
   applyLocationSuggestionToReceipt,
   buildEnrichedLocationSuggestion,
@@ -38,8 +36,10 @@ import {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } from "./src/lib/receiptCapture";
-import { buildReviewReceipt } from "./src/lib/reviewReceipt";
-import { applyCorrection } from "./src/lib/reviewQueue";
+import {
+  applyCorrection,
+  resolveReviewQueueAfterExtraction,
+} from "./src/lib/reviewQueue";
 import { getHealthRows } from "./src/lib/integrationCapabilities";
 import { getDefaultTriggerDashboard } from "./src/lib/integrationDashboard";
 import {
@@ -255,6 +255,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [exportError, setExportError] = useState(null);
   const [exportFormat, setExportFormat] = useState("csv");
   const [exportResult, setExportResult] = useState(null);
+  const [extractionFailed, setExtractionFailed] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isRunActionRunning, setIsRunActionRunning] = useState(false);
@@ -493,8 +494,8 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setExtractionFailed(false);
     setLocationSuggestionMessage(null);
-    setReviewedReceipts([]);
     setSelectingSource(source);
 
     try {
@@ -524,9 +525,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setConfirmedReceipt(false);
     setExportError(null);
     setExportResult(null);
+    setExtractionFailed(false);
     setLocationSuggestionMessage(null);
     setReceipt(null);
-    setReviewedReceipts([]);
   }
 
   async function handleUseReceipt() {
@@ -539,51 +540,57 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setExportError(null);
     setExportResult(null);
     setLocationSuggestionMessage(null);
-    setReviewedReceipts([]);
+    setExtractionFailed(false);
     setIsExtracting(true);
 
     try {
-      const result = await confirmReceiptExtraction(receipt, { vision });
-      const receiptForReview = buildReviewReceipt(result.receipt, receipt);
+      const outcome = await attemptReceiptExtraction(receipt, { vision });
+      setReviewedReceipts((current) =>
+        resolveReviewQueueAfterExtraction(current, outcome),
+      );
 
-      setReviewedReceipts([receiptForReview]);
-      setConfirmedReceipt(true);
-      void buildEnrichedLocationSuggestion({
-        locationTrigger: findLocationTrigger(integrationSync.triggerDefinitions),
-        platform: Platform.OS,
-        receipt: receiptForReview,
-        session,
-        userId: email,
-      })
-        .then(({ enrichedReceipt, payload }) => {
-          setReviewedReceipts((currentRows) =>
-            mergeEnrichedReceiptContext(
-              currentRows,
-              receiptForReview,
-              enrichedReceipt,
-            ),
-          );
-
-          if (payload) {
-            void callIntegrationFunction({
-              anonKey,
-              body: payload,
-              config: backendConfig,
-              functionName: "location-suggestions",
-              session,
-            })
-              .then(({ error }) => {
-                if (!error) {
-                  setLocationSuggestionMessage("Location suggestion queued.");
-                  void refreshSyncedTriggers();
-                }
-              })
-              .catch(() => {});
-          }
+      if (outcome.status === "succeeded") {
+        setConfirmedReceipt(true);
+        void buildEnrichedLocationSuggestion({
+          locationTrigger: findLocationTrigger(
+            integrationSync.triggerDefinitions,
+          ),
+          platform: Platform.OS,
+          receipt: outcome.row,
+          session,
+          userId: email,
         })
-        .catch(() => {});
-    } catch (error) {
-      setCaptureError(error?.message || "Unable to extract receipt fields.");
+          .then(({ enrichedReceipt, payload }) => {
+            setReviewedReceipts((currentRows) =>
+              mergeEnrichedReceiptContext(
+                currentRows,
+                outcome.row,
+                enrichedReceipt,
+              ),
+            );
+
+            if (payload) {
+              void callIntegrationFunction({
+                anonKey,
+                body: payload,
+                config: backendConfig,
+                functionName: "location-suggestions",
+                session,
+              })
+                .then(({ error }) => {
+                  if (!error) {
+                    setLocationSuggestionMessage("Location suggestion queued.");
+                    void refreshSyncedTriggers();
+                  }
+                })
+                .catch(() => {});
+            }
+          })
+          .catch(() => {});
+      } else {
+        setCaptureError(outcome.message);
+        setExtractionFailed(true);
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -1190,6 +1197,25 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                     <Text style={styles.buttonText}>Use this receipt</Text>
                   )}
                 </Pressable>
+                {extractionFailed ? (
+                  <Pressable
+                    accessibilityLabel="Try again"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isExtracting }}
+                    disabled={isExtracting}
+                    onPress={handleUseReceipt}
+                    style={({ pressed }) => [
+                      styles.secondaryButton,
+                      styles.actionButton,
+                      isExtracting ? styles.secondaryButtonDisabled : null,
+                      pressed && !isExtracting
+                        ? styles.secondaryButtonPressed
+                        : null,
+                    ]}
+                  >
+                    <Text style={styles.secondaryButtonText}>Try again</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ disabled: isExtracting }}

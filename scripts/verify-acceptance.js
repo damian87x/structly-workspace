@@ -17,9 +17,13 @@ const {
   buildWorkbookBase64,
 } = require("../src/lib/buildSpreadsheet");
 const {
+  EXTRACTION_FAILED_MESSAGE,
   RECEIPT_FIELD_ROWS,
   confirmReceiptExtraction,
 } = require("../src/lib/confirmReceiptExtraction");
+const {
+  attemptReceiptExtraction,
+} = require("../src/lib/attemptReceiptExtraction");
 const {
   ENRICHMENT_TIMEOUT_MS,
   enrichReceipt,
@@ -38,7 +42,10 @@ const {
   ANTHROPIC_VERSION,
   createClaudeVisionClient,
 } = require("../src/lib/claudeVisionClient");
-const { applyCorrection } = require("../src/lib/reviewQueue");
+const {
+  applyCorrection,
+  resolveReviewQueueAfterExtraction,
+} = require("../src/lib/reviewQueue");
 const {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
@@ -242,13 +249,12 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Pick from library/);
   assert.match(appSource, /Use this receipt/);
   assert.match(appSource, /Retake or change/);
+  assert.match(appSource, /Try again/);
   assert.match(appSource, /<Image/);
   assert.match(appSource, /buildReceiptSheet/);
-  assert.match(appSource, /confirmReceiptExtraction/);
-  assert.match(appSource, /confirmReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/);
-  assert.ok(
-    appSource.includes('import { buildReviewReceipt } from "./src/lib/reviewReceipt";'),
-  );
+  assert.match(appSource, /attemptReceiptExtraction/);
+  assert.match(appSource, /attemptReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/);
+  assert.match(appSource, /resolveReviewQueueAfterExtraction/);
   assert.ok(
     appSource.includes(
       'import {\n  applyLocationSuggestionToReceipt,\n  buildEnrichedLocationSuggestion,\n  createLocationTriggerCreatePayload,\n  getSuggestionDisplayLabel,\n} from "./src/lib/locationSuggestionFlow";',
@@ -256,7 +262,7 @@ function verifyScaffoldFiles() {
   );
   assert.match(
     appSource,
-    /const receiptForReview = buildReviewReceipt\(result\.receipt, receipt\);[\s\S]*setReviewedReceipts\(\[receiptForReview\]\);[\s\S]*setConfirmedReceipt\(true\);[\s\S]*void buildEnrichedLocationSuggestion\(/,
+    /const outcome = await attemptReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\);[\s\S]*setReviewedReceipts\(\(current\) =>[\s\S]*resolveReviewQueueAfterExtraction\(current, outcome\)[\s\S]*\);[\s\S]*if \(outcome\.status === "succeeded"\) \{[\s\S]*setConfirmedReceipt\(true\);[\s\S]*void buildEnrichedLocationSuggestion\(/,
   );
   assert.doesNotMatch(appSource, /await enrichReceipt/);
   // Exactly one suggestion post site, built only after enrichment resolves:
@@ -287,7 +293,9 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /Accountant handoff/);
   assert.match(appSource, /handoffNote/);
   assert.ok(
-    appSource.includes('import { applyCorrection } from "./src/lib/reviewQueue";'),
+    appSource.includes(
+      'import {\n  applyCorrection,\n  resolveReviewQueueAfterExtraction,\n} from "./src/lib/reviewQueue";',
+    ),
   );
   assert.ok(
     appSource.includes(
@@ -4586,6 +4594,191 @@ function verifyIntegrationUiSource() {
     appSource,
     /OpenClaw|Hermes|gateway token|worker implementation|DAYTONA|COMPOSIO|SERVICE_ROLE/i,
   );
+  assert.doesNotMatch(appSource, /OpenRouter|Anthropic|\bClaude\b/i);
+}
+
+async function verifyFlakyNetworkExtraction() {
+  const imgFixture = {
+    mimeType: "image/jpeg",
+    uri: "file://flaky-network-receipt.jpg",
+  };
+
+  // (i) NO-CRASH + SAFE COPY via production path
+  const fetchCalls = [];
+  const endpointClient = getDefaultClient({
+    env: {
+      STRUCTLY_RECEIPT_EXTRACT_ENDPOINT: "https://example.test/extract",
+    },
+    fetchImpl: async (url) => {
+      fetchCalls.push(url);
+      throw new Error("OpenRouter gateway 503 SERVICE_ROLE");
+    },
+    readImageBase64: async () => "b64",
+  });
+  const outcome = await attemptReceiptExtraction(imgFixture, {
+    vision: endpointClient,
+  });
+
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.failed, true);
+  assert.equal(outcome.message, EXTRACTION_FAILED_MESSAGE);
+  assert.doesNotMatch(
+    outcome.message,
+    /OpenClaw|Hermes|gateway token|worker implementation|DAYTONA|COMPOSIO|SERVICE_ROLE|OpenRouter|Claude|Anthropic/i,
+  );
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0], "https://example.test/extract");
+
+  // (ii) QUEUE RETENTION (same transition App uses) + OFFLINE EXPORT
+  const r1 = {
+    fields: {
+      category: "Office",
+      date: "2026-07-01",
+      gross: 24,
+      net: 20,
+      vat: 4,
+      vendor: "Flaky Vendor One",
+    },
+    sourceUri: "file://flaky-vendor-one.jpg",
+    validation: { issues: [], needsReview: false },
+  };
+  const r2 = {
+    fields: {
+      category: "Meals",
+      date: "2026-07-02",
+      gross: 12,
+      net: 10,
+      vat: 2,
+      vendor: "Flaky Vendor Two",
+    },
+    sourceUri: "file://flaky-vendor-two.jpg",
+    validation: { issues: [], needsReview: false },
+  };
+  const r3corrected = {
+    fields: {
+      category: "Travel",
+      date: "2026-07-03",
+      gross: 36,
+      net: 30,
+      vat: 6,
+      vendor: "Flaky Vendor Three",
+    },
+    sourceUri: "file://flaky-vendor-three.jpg",
+    validation: { issues: [], needsReview: false },
+  };
+  const prevRows = [r1, r2];
+  const kept = resolveReviewQueueAfterExtraction(prevRows, outcome);
+  assert.equal(kept, prevRows);
+
+  const modifiedRows = [...prevRows, r3corrected];
+  assert.equal(
+    resolveReviewQueueAfterExtraction(modifiedRows, outcome),
+    modifiedRows,
+  );
+
+  const realFetch = global.fetch;
+  let offlineFetchCalls = 0;
+  global.fetch = () => {
+    offlineFetchCalls += 1;
+    throw new Error("network down");
+  };
+
+  try {
+    const csvWrites = [];
+    const xlsxWrites = [];
+    await exportReviewedReceipts(kept, {
+      filename: "flaky-kept",
+      async writeFile(uri, contents) {
+        csvWrites.push({ contents, uri });
+      },
+      async share() {},
+    });
+    await exportReviewedReceipts(kept, {
+      filename: "flaky-kept",
+      format: "xlsx",
+      async writeFile(uri, contents) {
+        xlsxWrites.push({ contents, uri });
+      },
+      async share() {},
+    });
+
+    assert.equal(csvWrites.length, 1);
+    assert.match(csvWrites[0].contents, /Flaky Vendor One/);
+    assert.match(csvWrites[0].contents, /Flaky Vendor Two/);
+    assert.equal(xlsxWrites.length, 1);
+    const workbook = XLSX.read(xlsxWrites[0].contents, { type: "base64" });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    const vendors = rows.map((row) => row.vendor);
+    assert.ok(vendors.includes("Flaky Vendor One"));
+    assert.ok(vendors.includes("Flaky Vendor Two"));
+    assert.equal(offlineFetchCalls, 0);
+  } finally {
+    global.fetch = realFetch;
+  }
+
+  // (iii) RETRY -> SUCCESS via production path (SAME receipt proven)
+  const capturedImages = [];
+  const successClient = {
+    async extractReceipt(image) {
+      capturedImages.push(image);
+
+      return {
+        fields: {
+          category: { confidence: 0.95, value: "Office" },
+          date: { confidence: 0.96, value: "2026-07-07" },
+          gross: { confidence: 0.98, value: "24.00" },
+          net: { confidence: 0.98, value: "20.00" },
+          vat: { confidence: 0.98, value: "4.00" },
+          vendor: { confidence: 0.99, value: "Retry Market" },
+        },
+      };
+    },
+  };
+  const outcome2 = await attemptReceiptExtraction(imgFixture, {
+    vision: successClient,
+  });
+
+  assert.equal(outcome2.status, "succeeded");
+  assert.equal(outcome2.failed, false);
+  assert.equal(outcome2.message, null);
+  assert.equal(capturedImages[capturedImages.length - 1], imgFixture);
+  assert.deepEqual(
+    resolveReviewQueueAfterExtraction([r1, r2], outcome2),
+    [outcome2.row],
+  );
+
+  // (iv) APP SOURCE assertions
+  const appSource = fs.readFileSync("App.js", "utf8");
+  assert.match(appSource, /attemptReceiptExtraction/);
+  assert.match(
+    appSource,
+    /const outcome = await attemptReceiptExtraction\(receipt,\s*\{\s*vision\s*\}\)/,
+  );
+  assert.match(
+    appSource,
+    /setReviewedReceipts\(\(current\) =>[\s\S]*resolveReviewQueueAfterExtraction\(current, outcome\)/,
+  );
+  assert.match(appSource, /accessibilityLabel="Try again"/);
+  assert.match(appSource, /Try again/);
+  assert.match(
+    appSource,
+    /extractionFailed \?[\s\S]*onPress=\{handleUseReceipt\}/,
+  );
+  assert.match(appSource, /extractionFailed/);
+  assert.match(appSource, /setExtractionFailed/);
+  assert.match(
+    appSource,
+    /async function handleReceiptSelection[\s\S]*setExtractionFailed\(false\)/,
+  );
+  assert.match(
+    appSource,
+    /function handleRetakeOrChange\(\) \{[\s\S]*setExtractionFailed\(false\)/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /setCaptureError\(error\?\.message \|\| "Unable to extract receipt fields\."\)/,
+  );
+  assert.doesNotMatch(appSource, /error\?\.message \|\| "Unable to extract/);
 }
 
 function verifyE2EHarnessSource() {
@@ -4773,6 +4966,7 @@ async function main() {
   verifyObservabilityAndRedactionSource();
   verifySupabaseIntegrationSources();
   verifyIntegrationUiSource();
+  await verifyFlakyNetworkExtraction();
   verifyE2EHarnessSource();
   console.log("Acceptance checks passed.");
 }

@@ -114,6 +114,15 @@ function applyCorrection(rows, index, patch) {
   });
 }
 
+function resolveReviewQueueAfterExtraction(prevRows, outcome) {
+  if (outcome && outcome.status === "succeeded") {
+    return [outcome.row];
+  }
+
+  return prevRows;
+}
+
 module.exports = {
   applyCorrection,
+  resolveReviewQueueAfterExtraction,
 };

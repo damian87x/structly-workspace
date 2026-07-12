@@ -1,5 +1,8 @@
 const { processReceipts } = require("./receiptPipeline");
 
+const EXTRACTION_FAILED_MESSAGE =
+  "We couldn't read this receipt right now. Your reviewed receipts are still saved.";
+
 const RECEIPT_FIELD_ROWS = [
   { field: "vendor", label: "Vendor" },
   { field: "date", label: "Date" },
@@ -28,19 +31,12 @@ function buildReceiptFieldRows(receipt) {
   }));
 }
 
-function getExtractionFailureMessage(failures) {
-  const firstFailure = Array.isArray(failures) ? failures[0] : null;
-  const message = firstFailure?.error?.message;
-
-  return message || "Receipt extraction did not return any fields.";
-}
-
 async function confirmReceiptExtraction(receiptImage, { vision } = {}) {
   const result = await processReceipts([receiptImage], { vision });
   const receipt = result.receipts[0] || null;
 
   if (!receipt) {
-    const error = new Error(getExtractionFailureMessage(result.failures));
+    const error = new Error(EXTRACTION_FAILED_MESSAGE);
     error.failures = result.failures;
     throw error;
   }
@@ -58,6 +54,7 @@ async function confirmReceiptExtraction(receiptImage, { vision } = {}) {
 }
 
 module.exports = {
+  EXTRACTION_FAILED_MESSAGE,
   RECEIPT_FIELD_ROWS,
   buildReceiptFieldRows,
   confirmReceiptExtraction,
