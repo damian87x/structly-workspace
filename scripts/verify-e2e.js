@@ -1,5 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
+const XLSX = require("xlsx");
+
+const {
+  attemptReceiptExtraction,
+} = require("../src/lib/attemptReceiptExtraction");
+const {
+  exportReviewedReceipts,
+} = require("../src/lib/exportReviewedReceipts");
 
 const {
   createCodeExecutionRequest,
@@ -507,11 +515,108 @@ function verifyBackendFunctionSources() {
   assert.match(edgeHarnessSource, /verifyStatusReadFunction/);
 }
 
-function main() {
+// End-to-end capture -> extract -> review -> export loop (T1, epic #11 criterion 1).
+// Runs headless: the camera is a stubbed image, extraction uses an injected
+// deterministic vision client (no live OCR/API), and export uses injected
+// writeFile/share fakes (no expo-file-system). This proves the software loop
+// without a physical device; real-device OCR accuracy and permission grants are
+// the human-only remainder recorded in docs/dogfood/.
+async function verifyCaptureToExportLoop() {
+  // Stage 1 — capture: a stubbed camera image standing in for a device photo.
+  const capturedImage = {
+    capturedAt: Date.UTC(2026, 6, 9, 9, 30, 0),
+    source: "camera",
+    uri: "file://e2e-loop-receipt.jpg",
+  };
+
+  // Stage 2 — extract: inject a deterministic vision client so the loop is
+  // reproducible and offline. attemptReceiptExtraction is the same production
+  // containment path App.js runs.
+  const visionClient = {
+    async extractReceipt() {
+      return {
+        category: "Meals",
+        date: "2026-07-09",
+        gross: "12.00",
+        net: "10.00",
+        vat: "2.00",
+        vendor: "Loop Cafe",
+      };
+    },
+  };
+  const outcome = await attemptReceiptExtraction(capturedImage, {
+    vision: visionClient,
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.failed, false);
+  assert.equal(outcome.row.fields.vendor, "Loop Cafe");
+  // Extraction normalizes money strings to numbers ("12.00" -> 12).
+  assert.equal(Number(outcome.row.fields.gross), 12);
+  assert.equal(outcome.row.sourceUri, "file://e2e-loop-receipt.jpg");
+
+  // Stage 3 — review: the reviewed queue holds the extracted row.
+  const reviewedRows = [outcome.row];
+
+  // Stage 4a — export CSV (backend-independent; injected fakes, no filesystem).
+  const csvWrites = [];
+  await exportReviewedReceipts(reviewedRows, {
+    share: async () => {},
+    writeFile: async (uri, contents) => {
+      csvWrites.push({ contents, uri });
+    },
+  });
+  assert.equal(csvWrites.length, 1);
+  assert.match(csvWrites[0].uri, /\.csv$/);
+  assert.match(csvWrites[0].contents, /vendor,date,net,vat,gross/);
+  // The full extracted row flows through to the CSV (money normalized to numbers).
+  assert.match(csvWrites[0].contents, /Loop Cafe,2026-07-09,10,2,12,Meals/);
+
+  // Stage 4b — export .xlsx (SheetJS, backend-independent).
+  const xlsxWrites = [];
+  await exportReviewedReceipts(reviewedRows, {
+    format: "xlsx",
+    share: async () => {},
+    writeFile: async (uri, contents) => {
+      xlsxWrites.push({ contents, uri });
+    },
+  });
+  assert.equal(xlsxWrites.length, 1);
+  assert.match(xlsxWrites[0].uri, /\.xlsx$/);
+  const workbook = XLSX.read(xlsxWrites[0].contents, { type: "base64" });
+  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true });
+  assert.deepEqual(rows[0], [
+    "vendor",
+    "date",
+    "net",
+    "vat",
+    "gross",
+    "category",
+    "location",
+    "billable_client",
+    "business_purpose",
+    "payment_method",
+    "source_uri",
+    "review_status",
+    "review_reasons",
+  ]);
+  assert.equal(rows[1][0], "Loop Cafe");
+  const grossCell = worksheet[XLSX.utils.encode_cell({ c: 4, r: 1 })];
+  assert.equal(grossCell.t, "n");
+  assert.equal(grossCell.v, 12);
+
+  console.log("Capture-to-export loop E2E passed.");
+}
+
+async function main() {
   verifyStaticE2EContracts();
   verifyE2EFlow();
   verifyBackendFunctionSources();
+  await verifyCaptureToExportLoop();
   console.log("E2E integration checks passed.");
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
