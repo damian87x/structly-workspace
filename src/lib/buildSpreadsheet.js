@@ -10,6 +10,7 @@ const COLUMNS = [
 ];
 const NUMERIC_COLUMNS = new Set(["net", "vat", "gross"]);
 const HEADER_ROW = COLUMNS.join(",");
+const SCHEMA_VERSION = 1;
 const READY_STATUS = {
   EMPTY: "empty",
   NEEDS_REVIEW: "needs_review",
@@ -18,6 +19,67 @@ const READY_STATUS = {
 
 function getDefaultXlsx() {
   return require("xlsx");
+}
+
+function toSafeEntryBaseName(filename) {
+  const raw = typeof filename === "string" ? filename : "";
+  const segments = raw
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "." && segment !== "..");
+  let base = segments.length > 0 ? segments[segments.length - 1] : "";
+
+  base = base
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/[\\/]+/g, "")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^\.+/, "")
+    .trim();
+
+  // Strip a single trailing extension (e.g. .csv / .CSV / .zip).
+  base = base.replace(/\.[^.]+$/i, "");
+
+  base = base
+    .replace(/[^A-Za-z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return base || "receipts";
+}
+
+function buildExportManifest(receipts) {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    columns: [...COLUMNS],
+    rowCount: Array.isArray(receipts) ? receipts.length : 0,
+  };
+}
+
+function encodeUtf8Bytes(text) {
+  return new TextEncoder().encode(String(text ?? ""));
+}
+
+function buildExportBundleBase64(
+  { csv, manifest, baseName } = {},
+  dependencies = {},
+) {
+  const xlsx = dependencies.xlsx || getDefaultXlsx();
+  const CFB = xlsx.CFB;
+  const safeBase = toSafeEntryBaseName(baseName);
+  const zip = CFB.utils.cfb_new();
+
+  CFB.utils.cfb_add(zip, `${safeBase}.csv`, encodeUtf8Bytes(csv));
+  CFB.utils.cfb_add(
+    zip,
+    `${safeBase}.manifest.json`,
+    encodeUtf8Bytes(JSON.stringify(manifest, null, 2)),
+  );
+
+  return CFB.write(zip, {
+    fileType: "zip",
+    type: "base64",
+    compression: true,
+  });
 }
 
 function formatCellValue(value) {
@@ -539,8 +601,16 @@ function buildWorkbookBase64(receipts, dependencies = {}) {
   });
   const worksheet = xlsx.utils.aoa_to_sheet([[...COLUMNS], ...rows]);
   const workbook = xlsx.utils.book_new();
+  const manifest = buildExportManifest(receiptList);
+  const manifestSheet = xlsx.utils.aoa_to_sheet([
+    ["key", "value"],
+    ["schema_version", SCHEMA_VERSION],
+    ["columns", COLUMNS.join(",")],
+    ["row_count", manifest.rowCount],
+  ]);
 
   xlsx.utils.book_append_sheet(workbook, worksheet, "Receipts");
+  xlsx.utils.book_append_sheet(workbook, manifestSheet, "Manifest");
 
   return xlsx.write(workbook, { type: "base64", bookType: "xlsx" });
 }
@@ -567,6 +637,10 @@ function buildReceiptSheet(receipts) {
 }
 
 module.exports = {
+  SCHEMA_VERSION,
+  buildExportBundleBase64,
+  buildExportManifest,
   buildReceiptSheet,
   buildWorkbookBase64,
+  toSafeEntryBaseName,
 };

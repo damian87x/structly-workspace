@@ -1,4 +1,10 @@
-const { buildReceiptSheet, buildWorkbookBase64 } = require("./buildSpreadsheet");
+const {
+  buildExportBundleBase64,
+  buildExportManifest,
+  buildReceiptSheet,
+  buildWorkbookBase64,
+  toSafeEntryBaseName,
+} = require("./buildSpreadsheet");
 const exportShare = require("./exportShare");
 
 const DEFAULT_EXPORT_FILENAME = "reviewed-receipts";
@@ -97,6 +103,7 @@ async function exportReviewedReceipts(receipts, options = {}) {
   const summary = buildReceiptSummary(receiptList, sheet);
   const handoffNote = buildHandoffNote(receiptList, sheet);
   const filename = options.filename || getDefaultExportFilename(summary);
+  const manifest = buildExportManifest(receiptList);
   const shareDependencies = {
     directory: options.directory,
     share: options.share,
@@ -117,15 +124,25 @@ async function exportReviewedReceipts(receipts, options = {}) {
     return {
       exportResult,
       handoffNote,
+      manifest,
       sheet,
       summary,
     };
   }
 
-  const exportSheet = options.exportSheet || exportShare.exportSheet;
-  const exportResult = await exportSheet(
+  const baseName = toSafeEntryBaseName(filename);
+  const base64 = buildExportBundleBase64(
     {
+      baseName,
       csv: sheet.csv,
+      manifest,
+    },
+    { xlsx: options.xlsx },
+  );
+  const exportBundle = options.exportBundle || exportShare.exportBundle;
+  const exportResult = await exportBundle(
+    {
+      base64,
       filename,
     },
     shareDependencies,
@@ -134,6 +151,7 @@ async function exportReviewedReceipts(receipts, options = {}) {
   return {
     exportResult,
     handoffNote,
+    manifest,
     sheet,
     summary,
   };

@@ -851,7 +851,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                   exportFormat === "csv" ? styles.contextToggleTextSelected : null,
                 ]}
               >
-                CSV
+                CSV bundle (.zip)
               </Text>
             </Pressable>
             <Pressable

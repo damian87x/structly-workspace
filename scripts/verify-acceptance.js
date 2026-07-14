@@ -13,8 +13,12 @@ const {
 } = require("../src/lib/receiptCapture");
 const { buildReviewReceipt } = require("../src/lib/reviewReceipt");
 const {
+  SCHEMA_VERSION,
+  buildExportBundleBase64,
+  buildExportManifest,
   buildReceiptSheet,
   buildWorkbookBase64,
+  toSafeEntryBaseName,
 } = require("../src/lib/buildSpreadsheet");
 const {
   EXTRACTION_FAILED_MESSAGE,
@@ -32,7 +36,106 @@ const {
   buildHandoffNote,
   exportReviewedReceipts,
 } = require("../src/lib/exportReviewedReceipts");
-const { exportSheet, exportWorkbook } = require("../src/lib/exportShare");
+const {
+  exportBundle,
+  exportSheet,
+  exportWorkbook,
+} = require("../src/lib/exportShare");
+
+const EXPECTED_EXPORT_COLUMNS = [
+  "vendor",
+  "date",
+  "net",
+  "vat",
+  "gross",
+  "category",
+  "location",
+  "billable_client",
+  "business_purpose",
+  "payment_method",
+  "source_uri",
+  "review_status",
+  "review_reasons",
+];
+
+/**
+ * Zip members with paths derived from CFB FullPaths (not FileIndex[].name).
+ * FileIndex[].name is a basename that strips path traversal (e.g. "../evil.csv"
+ * becomes "evil.csv"); FullPaths retains the full member path and is required
+ * for load-bearing Zip Slip assertions.
+ */
+function getRealZipMembers(cfb) {
+  const fullPaths = cfb.FullPaths || [];
+  const fileIndex = cfb.FileIndex || [];
+  const members = [];
+
+  for (let i = 0; i < fileIndex.length; i += 1) {
+    const entry = fileIndex[i];
+    if (!entry || entry.type !== 2) {
+      continue;
+    }
+
+    const fullPath = String(fullPaths[i] || "");
+    // Strip the synthetic CFB root prefix; paths may still contain ".." or "/".
+    let name = fullPath.startsWith("Root Entry/")
+      ? fullPath.slice("Root Entry/".length)
+      : fullPath;
+
+    // Drop synthetic root (empty after strip) and SheetJS sentinel.
+    if (!name || name.startsWith("\x01")) {
+      continue;
+    }
+
+    members.push({
+      content: entry.content,
+      name,
+      type: entry.type,
+    });
+  }
+
+  return members;
+}
+
+function entryBytes(entry) {
+  const content = entry.content;
+  if (Buffer.isBuffer(content)) {
+    return content;
+  }
+  if (content instanceof Uint8Array) {
+    return Buffer.from(content);
+  }
+  if (Array.isArray(content)) {
+    return Buffer.from(content);
+  }
+  if (typeof content === "string") {
+    return Buffer.from(content, "binary");
+  }
+  return Buffer.from(content || []);
+}
+
+function readZipBundle(base64) {
+  const cfb = XLSX.CFB.read(base64, { type: "base64" });
+  const members = getRealZipMembers(cfb);
+  const byName = Object.fromEntries(
+    members.map((entry) => [entry.name, entryBytes(entry)]),
+  );
+  return { byName, members };
+}
+
+/** Assert every zip member path is a flat basename (no Zip Slip). */
+function assertSafeZipMemberPaths(members, context = "") {
+  for (const entry of members) {
+    const path = entry.name;
+    assert.ok(
+      !path.includes(".."),
+      `Zip Slip: member path contains ".."${context ? ` (${context})` : ""}: ${path}`,
+    );
+    assert.ok(
+      !path.includes("/"),
+      `Zip Slip: member path contains "/"${context ? ` (${context})` : ""}: ${path}`,
+    );
+  }
+}
 const {
   extractReceipt,
   getDefaultClient,
@@ -287,7 +390,7 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /const \[exportFormat, setExportFormat\] = useState\("csv"\)/);
   assert.match(appSource, /setExportFormat\("csv"\)/);
   assert.match(appSource, /setExportFormat\("xlsx"\)/);
-  assert.match(appSource, /CSV/);
+  assert.match(appSource, /CSV bundle \(\.zip\)/);
   assert.match(appSource, /Excel spreadsheet \(\.xlsx\)/);
   assert.match(appSource, /format: exportFormat/);
   assert.match(appSource, /Accountant handoff/);
@@ -1492,7 +1595,7 @@ async function verifyExportReviewedReceiptsHelper() {
     "Reviewed Market,2026-07-07,20,4,24,Office,,,,,file://reviewed-market.jpg,ready,",
     "Review Cafe,2026-07-08,10,2,13.5,Meals,,,,,file://review-cafe.jpg,needs_review,net plus VAT does not equal gross.",
   ].join("\n");
-  const expectedUri = "file:///tmp/structly-exports/reviewed-pack.csv";
+  const expectedUri = "file:///tmp/structly-exports/reviewed-pack.zip";
   const expectedHandoffNote = [
     "Structly receipt pack handoff",
     "",
@@ -1533,7 +1636,18 @@ async function verifyExportReviewedReceiptsHelper() {
     },
   });
 
-  assert.deepEqual(writes, [{ contents: expectedCsv, uri: expectedUri }]);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].uri, expectedUri);
+  assert.equal(typeof writes[0].contents, "string");
+  assert.ok(writes[0].contents.length > 0);
+  const pack = readZipBundle(writes[0].contents);
+  assert.deepEqual(
+    pack.members.map((entry) => entry.name).sort(),
+    ["reviewed-pack.csv", "reviewed-pack.manifest.json"].sort(),
+  );
+  assert.ok(
+    pack.byName["reviewed-pack.csv"].equals(Buffer.from(expectedCsv, "utf8")),
+  );
   assert.deepEqual(shares, [expectedUri]);
   assert.equal(result.handoffNote, expectedHandoffNote);
   assert.equal(result.sheet.csv, expectedCsv);
@@ -1576,13 +1690,18 @@ async function verifyExportReviewedReceiptsHelper() {
   });
   assert.deepEqual(result.exportResult, { shared: true, uri: expectedUri });
   assert.equal(buildHandoffNote(receipts, result.sheet), expectedHandoffNote);
+  assert.deepEqual(result.manifest, {
+    schemaVersion: 1,
+    columns: EXPECTED_EXPORT_COLUMNS,
+    rowCount: 2,
+  });
 
   const exportCalls = [];
   const injectedResult = await exportReviewedReceipts(receipts, {
     directory: "file:///tmp/custom/",
-    async exportSheet(payload, dependencies) {
+    async exportBundle(payload, dependencies) {
       exportCalls.push({ dependencies, payload });
-      return { shared: true, uri: "file:///tmp/custom/fake.csv" };
+      return { shared: true, uri: "file:///tmp/custom/fake.zip" };
     },
     filename: "custom-reviewed",
     async share() {},
@@ -1590,29 +1709,27 @@ async function verifyExportReviewedReceiptsHelper() {
   });
 
   assert.equal(exportCalls.length, 1);
-  assert.deepEqual(exportCalls[0].payload, {
-    csv: expectedCsv,
-    filename: "custom-reviewed",
-  });
+  assert.equal(exportCalls[0].payload.filename, "custom-reviewed");
+  assert.equal(typeof exportCalls[0].payload.base64, "string");
+  assert.ok(exportCalls[0].payload.base64.length > 0);
   assert.equal(exportCalls[0].dependencies.directory, "file:///tmp/custom/");
   assert.equal(typeof exportCalls[0].dependencies.share, "function");
   assert.equal(typeof exportCalls[0].dependencies.writeFile, "function");
   assert.equal(injectedResult.summary.rowCount, 2);
   assert.equal(injectedResult.handoffNote, expectedHandoffNote);
-  assert.equal(injectedResult.exportResult.uri, "file:///tmp/custom/fake.csv");
+  assert.equal(injectedResult.exportResult.uri, "file:///tmp/custom/fake.zip");
 
   const defaultNameCalls = [];
   await exportReviewedReceipts(receipts, {
-    async exportSheet(payload) {
+    async exportBundle(payload) {
       defaultNameCalls.push(payload);
-      return { shared: true, uri: "file:///tmp/custom/default.csv" };
+      return { shared: true, uri: "file:///tmp/custom/default.zip" };
     },
   });
 
-  assert.deepEqual(defaultNameCalls[0], {
-    csv: expectedCsv,
-    filename: "reviewed-receipts-2026-07",
-  });
+  assert.equal(defaultNameCalls[0].filename, "reviewed-receipts-2026-07");
+  assert.equal(typeof defaultNameCalls[0].base64, "string");
+  assert.ok(defaultNameCalls[0].base64.length > 0);
 }
 
 async function verifyWorkbookExport() {
@@ -1839,7 +1956,7 @@ async function verifyWorkbookExport() {
   assert.ok(base64.length > 0);
 
   const workbook = XLSX.read(base64, { type: "base64" });
-  assert.deepEqual(workbook.SheetNames, ["Receipts"]);
+  assert.deepEqual(workbook.SheetNames, ["Receipts", "Manifest"]);
   const worksheet = workbook.Sheets.Receipts;
 
   for (let columnIndex = 0; columnIndex < EXPECTED_COLUMNS.length; columnIndex += 1) {
@@ -2042,7 +2159,7 @@ async function verifyWorkbookExport() {
   const roundTripped = XLSX.read(xlsxExportWrites[0].contents, {
     type: "base64",
   });
-  assert.deepEqual(roundTripped.SheetNames, ["Receipts"]);
+  assert.deepEqual(roundTripped.SheetNames, ["Receipts", "Manifest"]);
   assert.equal(
     xlsxExportShares[0].options.mimeType,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2065,11 +2182,17 @@ async function verifyWorkbookExport() {
   assert.equal(defaultCsvWrites.length, 1);
   assert.equal(
     defaultCsvWrites[0].uri,
-    "file:///tmp/structly-exports/default-format.csv",
+    "file:///tmp/structly-exports/default-format.zip",
   );
-  assert.equal(defaultCsvWrites[0].options.encoding, "utf8");
-  assert.match(defaultCsvWrites[0].contents, /^vendor,date,net,vat,gross/);
-  assert.match(defaultCsvWrites[0].contents, /Money Matrix/);
+  assert.equal(defaultCsvWrites[0].options.encoding, "base64");
+  const defaultPack = readZipBundle(defaultCsvWrites[0].contents);
+  const defaultCsvBytes = defaultPack.byName["default-format.csv"];
+  assert.ok(defaultCsvBytes);
+  assert.match(defaultCsvBytes.toString("utf8"), /^vendor,date,net,vat,gross/);
+  assert.match(defaultCsvBytes.toString("utf8"), /Money Matrix/);
+  assert.ok(
+    defaultCsvBytes.equals(Buffer.from(xlsxExportResult.sheet.csv, "utf8")),
+  );
 
   const appSource = fs.readFileSync("App.js", "utf8");
   assert.match(
@@ -4703,8 +4826,11 @@ async function verifyFlakyNetworkExtraction() {
     });
 
     assert.equal(csvWrites.length, 1);
-    assert.match(csvWrites[0].contents, /Flaky Vendor One/);
-    assert.match(csvWrites[0].contents, /Flaky Vendor Two/);
+    assert.match(csvWrites[0].uri, /\.zip$/);
+    const flakyPack = readZipBundle(csvWrites[0].contents);
+    const flakyCsv = flakyPack.byName["flaky-kept.csv"].toString("utf8");
+    assert.match(flakyCsv, /Flaky Vendor One/);
+    assert.match(flakyCsv, /Flaky Vendor Two/);
     assert.equal(xlsxWrites.length, 1);
     const workbook = XLSX.read(xlsxWrites[0].contents, { type: "base64" });
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
@@ -4932,6 +5058,347 @@ function verifyE2EHarnessSource() {
   assert.match(pixelSmokeDocs, /--require-launch/);
 }
 
+async function verifyExportSchemaMetadata() {
+  assert.equal(SCHEMA_VERSION, 1);
+  assert.deepEqual(buildExportManifest([{ a: 1 }, { b: 2 }]), {
+    schemaVersion: 1,
+    columns: EXPECTED_EXPORT_COLUMNS,
+    rowCount: 2,
+  });
+  assert.deepEqual(buildExportManifest(null), {
+    schemaVersion: 1,
+    columns: EXPECTED_EXPORT_COLUMNS,
+    rowCount: 0,
+  });
+
+  const fixtures = [
+    {
+      sourceUri: "file://schema-meta.jpg",
+      fields: {
+        category: "Office",
+        date: "2026-07-07",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Schema Meta Co",
+      },
+      validation: { issues: [], needsReview: false },
+    },
+  ];
+  const expectedCsv = buildReceiptSheet(fixtures).csv;
+  const expectedColumns = [...EXPECTED_EXPORT_COLUMNS];
+
+  // AC1 + AC2: default CSV path is one atomic .zip write/share with byte-identical CSV.
+  const writes = [];
+  const shares = [];
+  const result = await exportReviewedReceipts(fixtures, {
+    filename: "reviewed-pack",
+    async share(uri, options) {
+      shares.push({ options, uri });
+    },
+    async writeFile(uri, contents, options) {
+      writes.push({ contents, options, uri });
+    },
+  });
+
+  assert.equal(writes.length, 1, "exactly one writeFile on CSV path");
+  assert.equal(shares.length, 1, "exactly one share on CSV path");
+  assert.equal(writes[0].uri, "file:///tmp/structly-exports/reviewed-pack.zip");
+  assert.equal(shares[0].uri, writes[0].uri);
+  assert.equal(writes[0].options.encoding, "base64");
+  assert.equal(shares[0].options.mimeType, "application/zip");
+  assert.equal(result.sheet.csv, expectedCsv);
+  assert.deepEqual(result.manifest, {
+    schemaVersion: 1,
+    columns: expectedColumns,
+    rowCount: fixtures.length,
+  });
+
+  const pack = readZipBundle(writes[0].contents);
+  assert.deepEqual(
+    pack.members.map((entry) => entry.name).sort(),
+    ["reviewed-pack.csv", "reviewed-pack.manifest.json"].sort(),
+  );
+  for (const entry of pack.members) {
+    assert.match(entry.name, /^[A-Za-z0-9_-]+\.(csv|manifest\.json)$/);
+  }
+  assertSafeZipMemberPaths(pack.members, "default export");
+  assert.ok(
+    pack.byName["reviewed-pack.csv"].equals(Buffer.from(expectedCsv, "utf8")),
+    "CSV entry bytes must be byte-identical to buildCsv / sheet.csv",
+  );
+  const manifestJson = JSON.parse(
+    pack.byName["reviewed-pack.manifest.json"].toString("utf8"),
+  );
+  assert.equal(manifestJson.schemaVersion, 1);
+  assert.deepEqual(manifestJson.columns, expectedColumns);
+  assert.equal(manifestJson.rowCount, fixtures.length);
+
+  // AC1 entry pairing + Zip Slip: table-drive filename inputs.
+  const filenameCases = [
+    "reviewed-pack",
+    "reviewed-pack.csv",
+    "reviewed-pack.CSV",
+    "../evil",
+    "®®¯evil",
+    undefined,
+  ];
+  for (const filename of filenameCases) {
+    const caseWrites = [];
+    const caseResult = await exportReviewedReceipts(fixtures, {
+      filename,
+      async share() {},
+      async writeFile(uri, contents) {
+        caseWrites.push({ contents, uri });
+      },
+    });
+    assert.equal(caseWrites.length, 1);
+    assert.match(caseWrites[0].uri, /\.zip$/);
+    const casePack = readZipBundle(caseWrites[0].contents);
+    const names = casePack.members.map((entry) => entry.name).sort();
+    assert.equal(names.length, 2);
+    for (const name of names) {
+      assert.match(
+        name,
+        /^[A-Za-z0-9_-]+\.(csv|manifest\.json)$/,
+        `unsafe zip member for filename=${String(filename)}: ${name}`,
+      );
+    }
+    assertSafeZipMemberPaths(casePack.members, `filename=${String(filename)}`);
+    const bases = names.map((name) => name.replace(/\.(csv|manifest\.json)$/, ""));
+    assert.equal(bases[0], bases[1], "csv and manifest share one base name");
+    const expectedBase =
+      filename === undefined
+        ? toSafeEntryBaseName(caseResult.exportResult.uri.split("/").pop())
+        : toSafeEntryBaseName(filename);
+    // When filename is undefined, default is period-derived; still ASCII-safe.
+    assert.match(bases[0], /^[A-Za-z0-9_-]+$/);
+    if (filename !== undefined) {
+      assert.equal(bases[0], expectedBase);
+    }
+    const csvName = names.find((name) => name.endsWith(".csv"));
+    assert.ok(
+      casePack.byName[csvName].equals(Buffer.from(caseResult.sheet.csv, "utf8")),
+    );
+  }
+
+  // Explicit Zip Slip regression: Unicode-masked traversal must not become ../
+  assert.equal(toSafeEntryBaseName("®®¯evil"), "evil");
+  assert.equal(toSafeEntryBaseName("../evil"), "evil");
+  assert.equal(toSafeEntryBaseName("reviewed-pack.CSV"), "reviewed-pack");
+
+  // Negative control: guard must FAIL on a genuine ../evil.csv archive member.
+  // (Proves FullPaths-based paths are load-bearing — FileIndex[].name alone would not.)
+  {
+    const maliciousCfb = XLSX.CFB.utils.cfb_new();
+    XLSX.CFB.utils.cfb_add(maliciousCfb, "../evil.csv", "vendor\nEvil\n");
+    const maliciousBase64 = XLSX.CFB.write(maliciousCfb, {
+      compression: true,
+      fileType: "zip",
+      type: "base64",
+    });
+    const maliciousPack = readZipBundle(maliciousBase64);
+    const maliciousPaths = maliciousPack.members.map((entry) => entry.name);
+    assert.ok(
+      maliciousPaths.some(
+        (path) => path.includes("..") || path.includes("/"),
+      ),
+      `negative control: expected traversal-visible path, got ${JSON.stringify(maliciousPaths)}`,
+    );
+    assert.throws(
+      () => assertSafeZipMemberPaths(maliciousPack.members, "malicious archive"),
+      /Zip Slip/,
+    );
+  }
+
+  // UTF-8 non-ASCII + emoji: archive bytes must equal TextEncoder/utf8 of sheet.csv
+  const utf8Fixtures = [
+    {
+      sourceUri: "file://cafe.jpg",
+      fields: {
+        category: "Meals",
+        date: "2026-07-09",
+        gross: 12,
+        net: 10,
+        vat: 2,
+        vendor: "Café Ó",
+      },
+      context: {
+        location: { placeName: "Tokyo 🍜" },
+      },
+      validation: { issues: [], needsReview: false },
+    },
+  ];
+  const utf8Writes = [];
+  const utf8Result = await exportReviewedReceipts(utf8Fixtures, {
+    filename: "utf8-pack",
+    async share() {},
+    async writeFile(uri, contents) {
+      utf8Writes.push({ contents, uri });
+    },
+  });
+  const utf8Pack = readZipBundle(utf8Writes[0].contents);
+  assert.ok(
+    utf8Pack.byName["utf8-pack.csv"].equals(
+      Buffer.from(utf8Result.sheet.csv, "utf8"),
+    ),
+  );
+  assert.match(utf8Result.sheet.csv, /Café Ó/);
+  assert.match(utf8Result.sheet.csv, /Tokyo 🍜/);
+
+  // UTF-8 malformed lone surrogates → U+FFFD (ef bf bd), not WTF-8 (ed a0 80)
+  for (const lone of ["\uD800", "\uDC00"]) {
+    const loneFixtures = [
+      {
+        sourceUri: "file://lone.jpg",
+        fields: {
+          category: "Office",
+          date: "2026-07-10",
+          gross: 1,
+          net: 1,
+          vat: 0,
+          vendor: `Vendor${lone}X`,
+        },
+        validation: { issues: [], needsReview: false },
+      },
+    ];
+    const loneWrites = [];
+    const loneResult = await exportReviewedReceipts(loneFixtures, {
+      filename: "lone-surrogate",
+      async share() {},
+      async writeFile(uri, contents) {
+        loneWrites.push({ contents, uri });
+      },
+    });
+    const lonePack = readZipBundle(loneWrites[0].contents);
+    const extracted = lonePack.byName["lone-surrogate.csv"];
+    const expected = Buffer.from(loneResult.sheet.csv, "utf8");
+    assert.ok(
+      extracted.equals(expected),
+      "lone surrogate CSV bytes must match Buffer/utf8 (U+FFFD)",
+    );
+    assert.ok(
+      !extracted.includes(Buffer.from([0xed, 0xa0, 0x80])) &&
+        !extracted.includes(Buffer.from([0xed, 0xb0, 0x80])),
+      "must not emit WTF-8 for lone surrogates",
+    );
+    // Platform TextEncoder replacement is ef bf bd
+    const encoderBytes = Buffer.from(new TextEncoder().encode(loneResult.sheet.csv));
+    assert.ok(extracted.equals(encoderBytes));
+  }
+
+  // AC1 XLSX: Manifest sheet + Receipts unchanged
+  const xlsxWrites = [];
+  await exportReviewedReceipts(fixtures, {
+    filename: "xlsx-meta",
+    format: "xlsx",
+    async share() {},
+    async writeFile(uri, contents) {
+      xlsxWrites.push({ contents, uri });
+    },
+  });
+  const xlsxBook = XLSX.read(xlsxWrites[0].contents, { type: "base64" });
+  assert.deepEqual(xlsxBook.SheetNames, ["Receipts", "Manifest"]);
+  const receiptsSheet = xlsxBook.Sheets.Receipts;
+  for (let i = 0; i < EXPECTED_EXPORT_COLUMNS.length; i += 1) {
+    const address = XLSX.utils.encode_cell({ r: 0, c: i });
+    assert.equal(receiptsSheet[address].v, EXPECTED_EXPORT_COLUMNS[i]);
+  }
+  assert.equal(
+    receiptsSheet[XLSX.utils.encode_cell({ r: 1, c: 0 })].v,
+    "Schema Meta Co",
+  );
+  const manifestAoA = XLSX.utils.sheet_to_json(xlsxBook.Sheets.Manifest, {
+    header: 1,
+    raw: true,
+  });
+  assert.deepEqual(manifestAoA[0], ["key", "value"]);
+  const manifestMap = Object.fromEntries(manifestAoA.slice(1));
+  assert.equal(manifestMap.schema_version, 1);
+  assert.equal(manifestMap.columns, EXPECTED_EXPORT_COLUMNS.join(","));
+  assert.equal(manifestMap.row_count, fixtures.length);
+
+  // Failure semantics: writeFile throw => zero share calls
+  const failShares = [];
+  await assert.rejects(
+    () =>
+      exportReviewedReceipts(fixtures, {
+        filename: "fail-write",
+        async writeFile() {
+          throw new Error("disk full");
+        },
+        async share(uri) {
+          failShares.push(uri);
+        },
+      }),
+    /disk full/,
+  );
+  assert.equal(failShares.length, 0);
+
+  // Empty receipt list still emits a bundle with rowCount 0 and full columns
+  const emptyWrites = [];
+  const emptyResult = await exportReviewedReceipts([], {
+    filename: "empty-pack",
+    async share() {},
+    async writeFile(uri, contents) {
+      emptyWrites.push({ contents, uri });
+    },
+  });
+  assert.equal(emptyWrites.length, 1);
+  assert.deepEqual(emptyResult.manifest, {
+    schemaVersion: 1,
+    columns: expectedColumns,
+    rowCount: 0,
+  });
+  const emptyPack = readZipBundle(emptyWrites[0].contents);
+  const emptyManifest = JSON.parse(
+    emptyPack.byName["empty-pack.manifest.json"].toString("utf8"),
+  );
+  assert.equal(emptyManifest.rowCount, 0);
+  assert.deepEqual(emptyManifest.columns, expectedColumns);
+  assert.ok(
+    emptyPack.byName["empty-pack.csv"].equals(
+      Buffer.from(emptyResult.sheet.csv, "utf8"),
+    ),
+  );
+
+  // Direct exportBundle primitive
+  const bundleWrites = [];
+  const bundleShares = [];
+  const directBase64 = buildExportBundleBase64({
+    baseName: "direct",
+    csv: expectedCsv,
+    manifest: buildExportManifest(fixtures),
+  });
+  const directResult = await exportBundle(
+    { base64: directBase64, filename: "direct" },
+    {
+      async share(uri, options) {
+        bundleShares.push({ options, uri });
+      },
+      async writeFile(uri, contents, options) {
+        bundleWrites.push({ contents, options, uri });
+      },
+    },
+  );
+  assert.equal(bundleWrites.length, 1);
+  assert.equal(bundleShares.length, 1);
+  assert.equal(bundleWrites[0].uri, "file:///tmp/structly-exports/direct.zip");
+  assert.equal(bundleWrites[0].options.encoding, "base64");
+  assert.equal(bundleShares[0].options.mimeType, "application/zip");
+  assert.deepEqual(directResult, {
+    shared: true,
+    uri: "file:///tmp/structly-exports/direct.zip",
+  });
+
+  // buildCsv source must remain untouched (load-bearing CSV bytes)
+  const buildSource = fs.readFileSync("src/lib/buildSpreadsheet.js", "utf8");
+  assert.match(buildSource, /function buildCsv\(receipts\)/);
+  assert.match(buildSource, /const HEADER_ROW = COLUMNS\.join\(","\)/);
+  assert.match(buildSource, /new TextEncoder\(\)\.encode/);
+  assert.match(buildSource, /function toSafeEntryBaseName/);
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -4945,6 +5412,7 @@ async function main() {
   await verifyWorkbookExport();
   await verifyExportShareModule();
   await verifyExportReviewedReceiptsHelper();
+  await verifyExportSchemaMetadata();
   verifyReviewQueueCorrections();
   verifyReceiptContextReviewHelper();
   await verifyReviewReceiptBuilder();

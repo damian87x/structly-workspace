@@ -557,7 +557,7 @@ async function verifyCaptureToExportLoop() {
   // Stage 3 — review: the reviewed queue holds the extracted row.
   const reviewedRows = [outcome.row];
 
-  // Stage 4a — export CSV (backend-independent; injected fakes, no filesystem).
+  // Stage 4a — export CSV bundle (.zip) (backend-independent; injected fakes).
   const csvWrites = [];
   await exportReviewedReceipts(reviewedRows, {
     share: async () => {},
@@ -566,10 +566,20 @@ async function verifyCaptureToExportLoop() {
     },
   });
   assert.equal(csvWrites.length, 1);
-  assert.match(csvWrites[0].uri, /\.csv$/);
-  assert.match(csvWrites[0].contents, /vendor,date,net,vat,gross/);
+  assert.match(csvWrites[0].uri, /\.zip$/);
+  const zipCfB = XLSX.CFB.read(csvWrites[0].contents, { type: "base64" });
+  const zipMembers = (zipCfB.FileIndex || []).filter(
+    (entry) => entry.type === 2 && !String(entry.name || "").startsWith("\x01"),
+  );
+  const csvEntry = zipMembers.find((entry) => /\.csv$/.test(entry.name));
+  assert.ok(csvEntry, "zip must contain a .csv member");
+  const csvBytes = Buffer.isBuffer(csvEntry.content)
+    ? csvEntry.content
+    : Buffer.from(csvEntry.content || []);
+  const csvText = csvBytes.toString("utf8");
+  assert.match(csvText, /vendor,date,net,vat,gross/);
   // The full extracted row flows through to the CSV (money normalized to numbers).
-  assert.match(csvWrites[0].contents, /Loop Cafe,2026-07-09,10,2,12,Meals/);
+  assert.match(csvText, /Loop Cafe,2026-07-09,10,2,12,Meals/);
 
   // Stage 4b — export .xlsx (SheetJS, backend-independent).
   const xlsxWrites = [];

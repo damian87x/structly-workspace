@@ -2,9 +2,11 @@ const DEFAULT_EXPORT_DIRECTORY = "file:///tmp/structly-exports/";
 const DEFAULT_FILENAME = "receipts.csv";
 const CSV_EXTENSION = ".csv";
 const XLSX_EXTENSION = ".xlsx";
+const ZIP_EXTENSION = ".zip";
 const CSV_MIME_TYPE = "text/csv";
 const XLSX_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const ZIP_MIME_TYPE = "application/zip";
 const CSV_UTI = "public.comma-separated-values-text";
 const ENCODING_UTF8 = "utf8";
 const ENCODING_BASE64 = "base64";
@@ -84,7 +86,11 @@ function sanitizeFilename(filename, extension = CSV_EXTENSION) {
       ? extension.toLowerCase()
       : `.${String(extension || CSV_EXTENSION).replace(/^\./, "").toLowerCase() || "csv"}`;
   const defaultName =
-    normalizedExtension === XLSX_EXTENSION ? "receipts.xlsx" : DEFAULT_FILENAME;
+    normalizedExtension === XLSX_EXTENSION
+      ? "receipts.xlsx"
+      : normalizedExtension === ZIP_EXTENSION
+        ? "receipts.zip"
+        : DEFAULT_FILENAME;
   const baseName = getCleanFilenameSegment(filename) || defaultName;
   const escapedExtension = normalizedExtension.replace(/\./g, "\\.");
   const extensionPattern = new RegExp(`${escapedExtension}$`, "i");
@@ -162,7 +168,23 @@ async function exportWorkbook({ base64, filename } = {}, dependencies = {}) {
   );
 }
 
+async function exportBundle({ base64, filename } = {}, dependencies = {}) {
+  assertExportableBase64(base64);
+
+  return exportFile(
+    {
+      content: base64,
+      encoding: ENCODING_BASE64,
+      extension: ZIP_EXTENSION,
+      filename,
+      mimeType: ZIP_MIME_TYPE,
+    },
+    dependencies,
+  );
+}
+
 module.exports = {
+  exportBundle,
   exportSheet,
   exportWorkbook,
 };
