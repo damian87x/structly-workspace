@@ -94,7 +94,10 @@ function resolveSafely(operation, fallback) {
   });
 }
 
-async function enrichReceipt(receipt, { location, calendar, events } = {}) {
+async function enrichReceipt(
+  receipt,
+  { location, calendar, events, useCalendar = true } = {},
+) {
   if (!isObject(receipt) || receipt.source !== "camera") {
     return receipt;
   }
@@ -115,7 +118,11 @@ async function enrichReceipt(receipt, { location, calendar, events } = {}) {
     ),
     resolveSafely(
       () =>
-        capturedAt
+        // Skip the calendar branch entirely when useCalendar is false.
+        // Do NOT pass calendar: null — calendarContext falls back to the real
+        // provider via `settings.calendar || getDefaultCalendar()` and would
+        // still prompt.
+        useCalendar && capturedAt
           ? getReceiptCalendarContext(capturedAt, { calendar: calendarProvider })
           : null,
       null,

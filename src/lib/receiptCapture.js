@@ -126,6 +126,7 @@ async function takeReceiptPhoto({
   imagePicker,
   location,
   now = () => new Date().toISOString(),
+  useLocation = true,
 } = {}) {
   const useDefaultProviders = !imagePicker && location === undefined;
   const picker = imagePicker || getDefaultImagePicker();
@@ -145,10 +146,22 @@ async function takeReceiptPhoto({
   }
 
   const result = await picker.launchCameraAsync(getImageOptions(picker));
-  const capturedLocation = await getCapturedLocation(locationProvider);
-  const context = capturedLocation ? { location: capturedLocation } : null;
+  // Resolve picker first so cancelled / empty results never request location.
+  const normalized = normalizePickerResult(result, "camera", () => now());
 
-  return normalizePickerResult(result, "camera", () => now(), context);
+  if (normalized.status !== "selected") {
+    return normalized;
+  }
+
+  if (useLocation) {
+    const capturedLocation = await getCapturedLocation(locationProvider);
+
+    if (capturedLocation) {
+      normalized.receipt.context = { location: capturedLocation };
+    }
+  }
+
+  return normalized;
 }
 
 async function pickReceiptFromLibrary({ imagePicker = getDefaultImagePicker() } = {}) {

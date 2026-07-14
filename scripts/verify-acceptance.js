@@ -11,6 +11,13 @@ const {
   pickReceiptFromLibrary,
   takeReceiptPhoto,
 } = require("../src/lib/receiptCapture");
+const {
+  DEVICE_SIGNAL_DECISIONS,
+  DEVICE_SIGNAL_RATIONALE,
+  classifySelectionResult,
+  resolveDeviceSignalOptions,
+  selectReceiptWithGate,
+} = require("../src/lib/deviceSignalGate");
 const { buildReviewReceipt } = require("../src/lib/reviewReceipt");
 const {
   SCHEMA_VERSION,
@@ -342,12 +349,11 @@ function verifyScaffoldFiles() {
   assert.match(appSource, /function SignInScreen/);
   assert.match(appSource, /function CaptureScreen/);
   assert.match(appSource, /setSession\(nextSession\)/);
-  assert.match(appSource, /takeReceiptPhoto/);
-  assert.match(appSource, /pickReceiptFromLibrary/);
-  assert.match(
-    appSource,
-    /handleReceiptSelection\(\(\) => takeReceiptPhoto\(\), "camera"\)/,
-  );
+  // Capture wiring goes through the device-signal gate (#6); App no longer
+  // imports takeReceiptPhoto / pickReceiptFromLibrary directly.
+  assert.match(appSource, /selectReceiptWithGate/);
+  assert.match(appSource, /handleReceiptSelection\("camera"\)/);
+  assert.match(appSource, /handleReceiptSelection\("library"\)/);
   assert.match(appSource, /Take photo/);
   assert.match(appSource, /Pick from library/);
   assert.match(appSource, /Use this receipt/);
@@ -646,6 +652,58 @@ async function verifyReceiptCaptureModule() {
   assert.equal(deniedResult.status, "permission-denied");
   assert.equal(deniedResult.error.message, PERMISSION_DENIED_ERROR);
   assert.equal(launchedAfterDenied, false);
+
+  // BUG REGRESSION A: cancelled camera must not request location.
+  const cancelledLocationCalls = [];
+  const cancelledCameraResult = await takeReceiptPhoto({
+    imagePicker: {
+      MediaTypeOptions: { Images: "Images" },
+      async launchCameraAsync() {
+        return { assets: null, canceled: true };
+      },
+      async requestCameraPermissionsAsync() {
+        return { granted: true };
+      },
+    },
+    location: {
+      async getCurrentPositionAsync() {
+        cancelledLocationCalls.push("getCurrentPosition");
+        return { coords: { latitude: 1, longitude: 2 } };
+      },
+      async requestForegroundPermissionsAsync() {
+        cancelledLocationCalls.push("requestLocation");
+        return { status: "granted" };
+      },
+    },
+  });
+  assert.equal(cancelledCameraResult.status, "cancelled");
+  assert.deepEqual(cancelledLocationCalls, []);
+
+  // BUG REGRESSION B: empty / no-URI camera result must not request location.
+  const emptyLocationCalls = [];
+  const emptyCameraResult = await takeReceiptPhoto({
+    imagePicker: {
+      MediaTypeOptions: { Images: "Images" },
+      async launchCameraAsync() {
+        return { assets: [], canceled: false };
+      },
+      async requestCameraPermissionsAsync() {
+        return { granted: true };
+      },
+    },
+    location: {
+      async getCurrentPositionAsync() {
+        emptyLocationCalls.push("getCurrentPosition");
+        return { coords: { latitude: 1, longitude: 2 } };
+      },
+      async requestForegroundPermissionsAsync() {
+        emptyLocationCalls.push("requestLocation");
+        return { status: "granted" };
+      },
+    },
+  });
+  assert.equal(emptyCameraResult.status, "empty");
+  assert.deepEqual(emptyLocationCalls, []);
 }
 
 function createReceiptClient(response) {
@@ -4718,6 +4776,20 @@ function verifyIntegrationUiSource() {
     /OpenClaw|Hermes|gateway token|worker implementation|DAYTONA|COMPOSIO|SERVICE_ROLE/i,
   );
   assert.doesNotMatch(appSource, /OpenRouter|Anthropic|\bClaude\b/i);
+
+  // AC2 names-only guard also covers the new rationale module source.
+  const deviceSignalGateSource = fs.readFileSync(
+    "src/lib/deviceSignalGate.js",
+    "utf8",
+  );
+  assert.doesNotMatch(
+    deviceSignalGateSource,
+    /OpenClaw|Hermes|gateway token|worker implementation|DAYTONA|COMPOSIO|SERVICE_ROLE/i,
+  );
+  assert.doesNotMatch(
+    deviceSignalGateSource,
+    /OpenRouter|Anthropic|\bClaude\b/i,
+  );
 }
 
 async function verifyFlakyNetworkExtraction() {
@@ -5399,6 +5471,472 @@ async function verifyExportSchemaMetadata() {
   assert.match(buildSource, /function toSafeEntryBaseName/);
 }
 
+async function verifyDeviceSignalPermissionRationale() {
+  // --- AC2: product copy (names + categories on COPY VALUES ONLY) ---
+  const copy = Object.values(DEVICE_SIGNAL_RATIONALE).join(" ");
+  assert.doesNotMatch(
+    copy,
+    /OpenClaw|Hermes|gateway token|DAYTONA|COMPOSIO|SERVICE_ROLE|OpenRouter|Anthropic|Claude/i,
+  );
+  assert.doesNotMatch(
+    copy,
+    /engine|provider|EXPO_PUBLIC|process\.env|worker|orchestrat/i,
+  );
+  assert.ok(DEVICE_SIGNAL_RATIONALE.body.length <= 180);
+  assert.match(DEVICE_SIGNAL_RATIONALE.body, /place/i);
+  assert.match(DEVICE_SIGNAL_RATIONALE.body, /receipt/i);
+  assert.match(DEVICE_SIGNAL_RATIONALE.body, /meeting/i);
+  assert.equal(DEVICE_SIGNAL_RATIONALE.continueLabel, "Continue");
+  assert.equal(DEVICE_SIGNAL_RATIONALE.declineLabel, "Not now");
+
+  // Guard must reject the known AC2-violating draft (categories, not just names).
+  const badCopy =
+    "Our provider engine reads process.env through worker orchestration to add the place to a receipt and match a receipt to a client meeting.";
+  assert.match(
+    badCopy,
+    /engine|provider|EXPO_PUBLIC|process\.env|worker|orchestrat/i,
+  );
+
+  assert.deepEqual(resolveDeviceSignalOptions(DEVICE_SIGNAL_DECISIONS.PENDING), {
+    useLocation: true,
+    useCalendar: true,
+  });
+  assert.deepEqual(resolveDeviceSignalOptions(DEVICE_SIGNAL_DECISIONS.ALLOWED), {
+    useLocation: true,
+    useCalendar: true,
+  });
+  assert.deepEqual(
+    resolveDeviceSignalOptions(DEVICE_SIGNAL_DECISIONS.DECLINED),
+    { useLocation: false, useCalendar: false },
+  );
+  assert.deepEqual(resolveDeviceSignalOptions(undefined), {
+    useLocation: true,
+    useCalendar: true,
+  });
+
+  // --- AC1: gate behaviour against REAL modules (provider fakes only) ---
+  function makeCaptureFakes({ locationGranted = true } = {}) {
+    const markers = [];
+    const imagePicker = {
+      MediaTypeOptions: { Images: "Images" },
+      async launchCameraAsync() {
+        markers.push("permission:camera-launch");
+        return {
+          assets: [
+            {
+              fileName: "gated-camera.jpg",
+              height: 100,
+              mimeType: "image/jpeg",
+              uri: "file://gated-camera.jpg",
+              width: 80,
+            },
+          ],
+          canceled: false,
+        };
+      },
+      async launchImageLibraryAsync() {
+        markers.push("permission:library-launch");
+        return {
+          assets: [
+            {
+              fileName: "gated-library.png",
+              mimeType: "image/png",
+              uri: "file://gated-library.png",
+            },
+          ],
+          canceled: false,
+        };
+      },
+      async requestCameraPermissionsAsync() {
+        markers.push("permission:camera");
+        return { granted: true };
+      },
+      async requestMediaLibraryPermissionsAsync() {
+        markers.push("permission:library");
+        return { granted: true };
+      },
+    };
+    const location = {
+      async getCurrentPositionAsync() {
+        markers.push("permission:position");
+        return { coords: { latitude: 51.5, longitude: -0.12 } };
+      },
+      async requestForegroundPermissionsAsync() {
+        markers.push("permission:location");
+        return locationGranted
+          ? { status: "granted" }
+          : { status: "denied" };
+      },
+    };
+    const capture = {
+      takeReceiptPhoto: (opts) =>
+        takeReceiptPhoto({ ...opts, imagePicker, location }),
+      pickReceiptFromLibrary: () => pickReceiptFromLibrary({ imagePicker }),
+    };
+    return { capture, markers };
+  }
+
+  // camera + PENDING -> showRationale, no capture, ZERO permission requests
+  {
+    const { capture, markers } = makeCaptureFakes();
+    let rationaleShown = 0;
+    const result = await selectReceiptWithGate({
+      decision: DEVICE_SIGNAL_DECISIONS.PENDING,
+      source: "camera",
+      showRationale: () => {
+        rationaleShown += 1;
+        markers.push("rationale");
+      },
+      capture,
+    });
+    assert.equal(result.status, "rationale-required");
+    assert.equal(result.receipt, null);
+    assert.equal(rationaleShown, 1);
+    assert.equal(
+      markers.filter((m) => m.startsWith("permission:")).length,
+      0,
+    );
+    assert.deepEqual(markers, ["rationale"]);
+  }
+
+  // camera + ALLOWED -> capture once; location requested once
+  {
+    const { capture, markers } = makeCaptureFakes();
+    const result = await selectReceiptWithGate({
+      decision: DEVICE_SIGNAL_DECISIONS.ALLOWED,
+      source: "camera",
+      showRationale: () => markers.push("rationale"),
+      capture,
+    });
+    assert.equal(result.status, "selected");
+    assert.equal(result.receipt.source, "camera");
+    assert.ok(result.receipt.context?.location);
+    assert.equal(
+      markers.filter((m) => m === "permission:camera").length,
+      1,
+    );
+    assert.equal(
+      markers.filter((m) => m === "permission:location").length,
+      1,
+    );
+    assert.equal(markers.includes("rationale"), false);
+  }
+
+  // camera + DECLINED -> capture once; ZERO location permission requests
+  {
+    const { capture, markers } = makeCaptureFakes();
+    const result = await selectReceiptWithGate({
+      decision: DEVICE_SIGNAL_DECISIONS.DECLINED,
+      source: "camera",
+      showRationale: () => markers.push("rationale"),
+      capture,
+    });
+    assert.equal(result.status, "selected");
+    assert.equal(result.receipt.source, "camera");
+    assert.equal(result.receipt.context, undefined);
+    assert.equal(
+      markers.filter((m) => m === "permission:camera").length,
+      1,
+    );
+    assert.equal(
+      markers.filter((m) => m === "permission:location").length,
+      0,
+    );
+  }
+
+  // library is NEVER gated (even while PENDING)
+  {
+    const { capture, markers } = makeCaptureFakes();
+    const result = await selectReceiptWithGate({
+      decision: DEVICE_SIGNAL_DECISIONS.PENDING,
+      source: "library",
+      showRationale: () => markers.push("rationale"),
+      capture,
+    });
+    assert.equal(result.status, "selected");
+    assert.equal(result.receipt.source, "library");
+    assert.equal(markers.includes("rationale"), false);
+    assert.ok(markers.includes("permission:library"));
+  }
+
+  // ordering: rationale marker strictly BEFORE any permission:* marker
+  {
+    const markers = [];
+    const { capture } = makeCaptureFakes();
+    await selectReceiptWithGate({
+      decision: DEVICE_SIGNAL_DECISIONS.PENDING,
+      source: "camera",
+      showRationale: () => markers.push("rationale"),
+      capture,
+    });
+    const rationaleIndex = markers.indexOf("rationale");
+    const firstPermission = markers.findIndex((m) =>
+      m.startsWith("permission:"),
+    );
+    assert.ok(rationaleIndex >= 0);
+    assert.equal(firstPermission, -1);
+  }
+
+  // enrich with useCalendar: false -> getReceiptCalendarContext NEVER INVOKED
+  // (guards the || trap). Injected calendar fakes are hollow under Node because
+  // require("expo-calendar") throws and resolveSafely swallows it; spy the
+  // export BEFORE requiring enrichReceipt so the destructure binds the spy.
+  function loadEnrichWithCalendarSpy() {
+    delete require.cache[require.resolve("../src/lib/enrichReceipt")];
+    delete require.cache[require.resolve("../src/lib/calendarContext")];
+    const calendarContext = require("../src/lib/calendarContext");
+    let invocations = 0;
+    const original = calendarContext.getReceiptCalendarContext;
+    calendarContext.getReceiptCalendarContext = function spy(...args) {
+      invocations += 1;
+      return original.apply(this, args);
+    };
+    const { enrichReceipt: enrichWithSpy } = require("../src/lib/enrichReceipt");
+    return {
+      enrichReceipt: enrichWithSpy,
+      calls: () => invocations,
+      restore() {
+        calendarContext.getReceiptCalendarContext = original;
+        delete require.cache[require.resolve("../src/lib/enrichReceipt")];
+        delete require.cache[require.resolve("../src/lib/calendarContext")];
+      },
+    };
+  }
+
+  {
+    const receipt = {
+      capturedAt: "2026-07-08T10:30:00.000Z",
+      fields: { gross: 10, vendor: "NoCal Cafe" },
+      source: "camera",
+    };
+
+    // CONTROL: useCalendar true must invoke getReceiptCalendarContext once
+    // (proves the spy is wired to the destructured binding).
+    {
+      const { enrichReceipt: enrichWithSpy, calls, restore } =
+        loadEnrichWithCalendarSpy();
+      try {
+        await enrichWithSpy(receipt, { useCalendar: true });
+        assert.equal(
+          calls(),
+          1,
+          "control: useCalendar:true must invoke getReceiptCalendarContext once",
+        );
+      } finally {
+        restore();
+      }
+    }
+
+    // GUARD: useCalendar false must NEVER invoke getReceiptCalendarContext
+    {
+      const { enrichReceipt: enrichWithSpy, calls, restore } =
+        loadEnrichWithCalendarSpy();
+      try {
+        const enriched = await enrichWithSpy(receipt, { useCalendar: false });
+        assert.equal(enriched, receipt);
+        assert.equal(
+          calls(),
+          0,
+          "useCalendar:false must not invoke getReceiptCalendarContext",
+        );
+      } finally {
+        restore();
+      }
+    }
+  }
+
+  // --- AC3: denial-to-export ---
+  {
+    const locationCalls = [];
+    const calendarCalls = [];
+    const imagePicker = {
+      MediaTypeOptions: { Images: "Images" },
+      async launchCameraAsync() {
+        return {
+          assets: [
+            {
+              fileName: "denied-signals.jpg",
+              mimeType: "image/jpeg",
+              uri: "file://denied-signals.jpg",
+            },
+          ],
+          canceled: false,
+        };
+      },
+      async requestCameraPermissionsAsync() {
+        return { granted: true };
+      },
+    };
+    const location = {
+      async getCurrentPositionAsync() {
+        locationCalls.push("getCurrentPosition");
+        return { coords: { latitude: 51.5, longitude: -0.12 } };
+      },
+      async requestForegroundPermissionsAsync() {
+        locationCalls.push("requestLocation");
+        return { status: "denied" };
+      },
+      async reverseGeocodeAsync() {
+        locationCalls.push("reverseGeocode");
+        return [];
+      },
+    };
+    const captureResult = await takeReceiptPhoto({
+      imagePicker,
+      location,
+      useLocation: true,
+    });
+    assert.equal(captureResult.status, "selected");
+    assert.equal(captureResult.receipt.uri, "file://denied-signals.jpg");
+    assert.equal(
+      locationCalls.filter((c) => c === "requestLocation").length,
+      1,
+    );
+    assert.equal(
+      locationCalls.filter((c) => c === "getCurrentPosition").length,
+      0,
+    );
+
+    const extraction = await attemptReceiptExtraction(captureResult.receipt, {
+      vision: {
+        async extractReceipt() {
+          return {
+            fields: {
+              category: { confidence: 0.95, value: "Meals" },
+              date: { confidence: 0.96, value: "2026-07-08" },
+              gross: { confidence: 0.98, value: "12.00" },
+              net: { confidence: 0.98, value: "10.00" },
+              vat: { confidence: 0.98, value: "2.00" },
+              vendor: { confidence: 0.99, value: "Denied Signals Cafe" },
+            },
+          };
+        },
+      },
+    });
+    assert.equal(extraction.status, "succeeded");
+    const queue = resolveReviewQueueAfterExtraction([], extraction);
+    assert.equal(queue.length, 1);
+
+    const enriched = await enrichReceipt(queue[0], {
+      useCalendar: true,
+      calendar: {
+        async getEventsAsync() {
+          calendarCalls.push("getEvents");
+          return [];
+        },
+        async requestCalendarPermissionsAsync() {
+          calendarCalls.push("requestCalendar");
+          return { status: "denied" };
+        },
+      },
+      location,
+    });
+    assert.equal(enriched, queue[0]);
+    assert.equal(
+      locationCalls.filter((c) => c === "getCurrentPosition").length,
+      0,
+    );
+    assert.equal(
+      locationCalls.filter((c) => c === "reverseGeocode").length,
+      0,
+    );
+    assert.equal(calendarCalls.filter((c) => c === "getEvents").length, 0);
+    assert.equal(
+      calendarCalls.filter((c) => c === "requestCalendar").length,
+      1,
+    );
+
+    const writes = [];
+    const shares = [];
+    const exportResult = await exportReviewedReceipts(queue, {
+      format: "csv",
+      filename: "denied-signals-pack",
+      async writeFile(uri, contents) {
+        writes.push({ uri, contents });
+      },
+      async share(uri) {
+        shares.push(uri);
+      },
+    });
+    assert.ok(exportResult.exportResult);
+    assert.equal(exportResult.exportResult.shared, true);
+    assert.equal(writes.length, 1);
+    assert.equal(shares.length, 1);
+  }
+
+  // --- AC4: App source wiring (bindings, not just free text) ---
+  const appSource = fs.readFileSync("App.js", "utf8");
+  assert.match(appSource, /DEVICE_SIGNAL_RATIONALE\.title/);
+  assert.match(appSource, /DEVICE_SIGNAL_RATIONALE\.body/);
+  assert.match(appSource, /DEVICE_SIGNAL_RATIONALE\.continueLabel/);
+  assert.match(appSource, /DEVICE_SIGNAL_RATIONALE\.declineLabel/);
+  assert.match(appSource, /selectReceiptWithGate/);
+  assert.match(appSource, /classifySelectionResult/);
+  assert.match(appSource, /resolveDeviceSignalOptions\(deviceSignalDecision\)/);
+  assert.match(appSource, /enrichOptions:\s*resolveDeviceSignalOptions/);
+  assert.match(
+    appSource,
+    /handleReceiptSelection\(source,\s*DEVICE_SIGNAL_DECISIONS\.ALLOWED\)/,
+  );
+  assert.match(
+    appSource,
+    /handleReceiptSelection\(source,\s*DEVICE_SIGNAL_DECISIONS\.DECLINED\)/,
+  );
+  assert.match(appSource, /deviceSignalDecision/);
+  assert.match(appSource, /pendingDeviceSignalSource/);
+
+  // --- Fall-through: behavioural unit test of pure classifier ---
+  // Mutant that sets captureError for rationale-required MUST fail here.
+  {
+    const rationale = classifySelectionResult({
+      status: "rationale-required",
+      receipt: null,
+      error: null,
+    });
+    assert.equal(rationale.kind, "rationale");
+    assert.equal(
+      rationale.captureError,
+      null,
+      "rationale-required must not produce a capture error (false first-tap)",
+    );
+
+    const cancelled = classifySelectionResult({
+      status: "cancelled",
+      receipt: null,
+      error: null,
+    });
+    assert.equal(cancelled.kind, "cancelled");
+    assert.equal(cancelled.captureError, null);
+
+    const errorResult = classifySelectionResult({
+      status: "error",
+      receipt: null,
+      error: { message: "camera denied" },
+    });
+    assert.equal(errorResult.kind, "error");
+    assert.equal(errorResult.captureError, "camera denied");
+
+    const missingReceipt = classifySelectionResult({
+      status: "selected",
+      receipt: null,
+      error: null,
+    });
+    assert.equal(missingReceipt.kind, "error");
+    assert.equal(
+      missingReceipt.captureError,
+      "Unable to select a receipt image.",
+    );
+
+    const ok = classifySelectionResult({
+      status: "selected",
+      receipt: { uri: "file://ok.jpg" },
+      error: null,
+    });
+    assert.equal(ok.kind, "receipt");
+    assert.equal(ok.captureError, null);
+  }
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -5420,6 +5958,7 @@ async function main() {
   await verifyLocationContextModule();
   await verifyCalendarContextModule();
   await verifyEnrichReceiptModule();
+  await verifyDeviceSignalPermissionRationale();
   verifyIntegrationRoadmap();
   await verifyIntegrationBackendClientModule();
   verifyIntegrationCapabilityHealthModule();

@@ -33,9 +33,12 @@ import {
 import { exportReviewedReceipts } from "./src/lib/exportReviewedReceipts";
 import { shouldSendHeartbeat } from "./src/lib/heartbeats";
 import {
-  pickReceiptFromLibrary,
-  takeReceiptPhoto,
-} from "./src/lib/receiptCapture";
+  DEVICE_SIGNAL_DECISIONS,
+  DEVICE_SIGNAL_RATIONALE,
+  classifySelectionResult,
+  resolveDeviceSignalOptions,
+  selectReceiptWithGate,
+} from "./src/lib/deviceSignalGate";
 import {
   applyCorrection,
   resolveReviewQueueAfterExtraction,
@@ -262,6 +265,11 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   const [isTriggerActionRunning, setIsTriggerActionRunning] = useState(false);
   const [locationSuggestionMessage, setLocationSuggestionMessage] = useState(null);
   const [locationTriggerPlace, setLocationTriggerPlace] = useState("");
+  const [deviceSignalDecision, setDeviceSignalDecision] = useState(
+    DEVICE_SIGNAL_DECISIONS.PENDING,
+  );
+  const [pendingDeviceSignalSource, setPendingDeviceSignalSource] =
+    useState(null);
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
@@ -485,7 +493,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     };
   }, [anonKey, backendConfig, email, session]);
 
-  async function handleReceiptSelection(selectReceipt, source) {
+  async function handleReceiptSelection(source, decisionOverride) {
     if (selectingSource) {
       return;
     }
@@ -499,16 +507,26 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setSelectingSource(source);
 
     try {
-      const result = await selectReceipt();
+      const decision =
+        decisionOverride === undefined
+          ? deviceSignalDecision
+          : decisionOverride;
+      const result = await selectReceiptWithGate({
+        decision,
+        source,
+        showRationale: () => {
+          setPendingDeviceSignalSource(source);
+        },
+      });
 
-      if (result.status === "cancelled") {
+      // FALL-THROUGH FIX: pure classifier — rationale-required must not set
+      // "Unable to select a receipt image." (false first-tap error).
+      const classified = classifySelectionResult(result);
+      if (classified.kind === "rationale" || classified.kind === "cancelled") {
         return;
       }
-
-      if (result.error || !result.receipt) {
-        setCaptureError(
-          result.error?.message || "Unable to select a receipt image.",
-        );
+      if (classified.kind === "error") {
+        setCaptureError(classified.captureError);
         return;
       }
 
@@ -518,6 +536,22 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     } finally {
       setSelectingSource(null);
     }
+  }
+
+  function handleDeviceSignalContinue() {
+    const source = pendingDeviceSignalSource || "camera";
+    setDeviceSignalDecision(DEVICE_SIGNAL_DECISIONS.ALLOWED);
+    setPendingDeviceSignalSource(null);
+    // STALE-CLOSURE FIX: pass nextDecision explicitly; setState does not
+    // commit in the same tick, so a closure read would re-enter PENDING.
+    void handleReceiptSelection(source, DEVICE_SIGNAL_DECISIONS.ALLOWED);
+  }
+
+  function handleDeviceSignalDecline() {
+    const source = pendingDeviceSignalSource || "camera";
+    setDeviceSignalDecision(DEVICE_SIGNAL_DECISIONS.DECLINED);
+    setPendingDeviceSignalSource(null);
+    void handleReceiptSelection(source, DEVICE_SIGNAL_DECISIONS.DECLINED);
   }
 
   function handleRetakeOrChange() {
@@ -552,6 +586,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
       if (outcome.status === "succeeded") {
         setConfirmedReceipt(true);
         void buildEnrichedLocationSuggestion({
+          enrichOptions: resolveDeviceSignalOptions(deviceSignalDecision),
           locationTrigger: findLocationTrigger(
             integrationSync.triggerDefinitions,
           ),
@@ -1258,6 +1293,55 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
               </View>
             ) : null}
           </>
+        ) : pendingDeviceSignalSource ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>
+              {DEVICE_SIGNAL_RATIONALE.title}
+            </Text>
+            <Text style={styles.panelMeta}>{DEVICE_SIGNAL_RATIONALE.body}</Text>
+            <View style={styles.actionRow}>
+              <Pressable
+                accessibilityLabel={DEVICE_SIGNAL_RATIONALE.continueLabel}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(selectingSource) }}
+                disabled={Boolean(selectingSource)}
+                onPress={handleDeviceSignalContinue}
+                style={({ pressed }) => [
+                  styles.button,
+                  styles.actionButton,
+                  selectingSource ? styles.buttonDisabled : null,
+                  pressed && !selectingSource ? styles.buttonPressed : null,
+                ]}
+              >
+                {selectingSource ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.buttonText}>
+                    {DEVICE_SIGNAL_RATIONALE.continueLabel}
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                accessibilityLabel={DEVICE_SIGNAL_RATIONALE.declineLabel}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(selectingSource) }}
+                disabled={Boolean(selectingSource)}
+                onPress={handleDeviceSignalDecline}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  styles.actionButton,
+                  selectingSource ? styles.secondaryButtonDisabled : null,
+                  pressed && !selectingSource
+                    ? styles.secondaryButtonPressed
+                    : null,
+                ]}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {DEVICE_SIGNAL_RATIONALE.declineLabel}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Add a receipt</Text>
@@ -1269,9 +1353,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(selectingSource) }}
                 disabled={Boolean(selectingSource)}
-                onPress={() =>
-                  handleReceiptSelection(() => takeReceiptPhoto(), "camera")
-                }
+                onPress={() => handleReceiptSelection("camera")}
                 style={({ pressed }) => [
                   styles.button,
                   styles.actionButton,
@@ -1289,9 +1371,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(selectingSource) }}
                 disabled={Boolean(selectingSource)}
-                onPress={() =>
-                  handleReceiptSelection(pickReceiptFromLibrary, "library")
-                }
+                onPress={() => handleReceiptSelection("library")}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   styles.actionButton,
