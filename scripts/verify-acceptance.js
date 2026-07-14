@@ -162,6 +162,13 @@ const {
   getReceiptContextDisplay,
   mergeReceiptContextSuggestion,
 } = require("../src/lib/receiptContextReview");
+const {
+  deriveLocationFieldSuggestion,
+} = require("../src/lib/locationFieldSuggestion");
+const {
+  isSameReviewedReceipt,
+  mergeEnrichedReceiptContext,
+} = require("../src/lib/reviewRowMerge");
 const { processReceipts } = require("../src/lib/receiptPipeline");
 const {
   attachCalendarContext,
@@ -386,8 +393,22 @@ function verifyScaffoldFiles() {
     /\.then\(\(\{ enrichedReceipt, payload \}\) =>[\s\S]*if \(payload\) \{[\s\S]*functionName: "location-suggestions"/,
   );
   assert.doesNotMatch(appSource, /createMobileLocationSuggestionPayload/);
-  assert.match(appSource, /function mergeEnrichedReceiptContext/);
-  assert.match(appSource, /mergeReceiptContextSuggestion\(currentReceipt, enrichedReceipt\.context\)/);
+  // mergeEnrichedReceiptContext: import AND invoke are both required.
+  // Import-only was a coverage hole — a no-op replacement of the call still
+  // left placeName off the row and hid the vendor/category suggestion (M1).
+  // Source assertion cannot prove semantics (no renderer; see issue #20) but
+  // MUST catch the call being deleted or neutered.
+  assert.match(
+    appSource,
+    /import \{\s*mergeEnrichedReceiptContext\s*\} from "\.\/src\/lib\/reviewRowMerge"/,
+  );
+  assert.doesNotMatch(appSource, /function mergeEnrichedReceiptContext/);
+  // Enrichment completion callback: setReviewedReceipts updater MUST call
+  // mergeEnrichedReceiptContext(currentRows, outcome.row, enrichedReceipt).
+  assert.match(
+    appSource,
+    /setReviewedReceipts\(\(currentRows\) =>\s*mergeEnrichedReceiptContext\(\s*currentRows,\s*outcome\.row,\s*enrichedReceipt\s*,?\s*\)/,
+  );
   assert.match(appSource, /RECEIPT_FIELD_ROWS\.map/);
   assert.match(appSource, /fieldRow\.label/);
   assert.match(appSource, /fieldRow\.displayValue/);
@@ -408,8 +429,19 @@ function verifyScaffoldFiles() {
   );
   assert.ok(
     appSource.includes(
-      'import {\n  CONTEXT_REVIEW_DECISIONS,\n  applyReceiptContextDecision,\n  getReceiptContextDisplay,\n  mergeReceiptContextSuggestion,\n} from "./src/lib/receiptContextReview";',
+      'import {\n  CONTEXT_REVIEW_DECISIONS,\n  applyReceiptContextDecision,\n  getReceiptContextDisplay,\n} from "./src/lib/receiptContextReview";',
     ),
+  );
+  assert.match(
+    appSource,
+    /import \{\s*deriveLocationFieldSuggestion\s*\} from "\.\/src\/lib\/locationFieldSuggestion"/,
+  );
+  // Apply path: re-derive inside setReviewedReceipts updater (not a stale
+  // closure capture). Deleting the re-derive or using a captured value (M2)
+  // must fail — import alone is not enough.
+  assert.match(
+    appSource,
+    /setReviewedReceipts\(\(currentRows\) =>\s*\{[\s\S]*?const freshSuggestion = deriveLocationFieldSuggestion\(currentRows\[0\]\);[\s\S]*?return applyCorrection\(currentRows,\s*0,\s*freshSuggestion\);/,
   );
   assert.match(appSource, /Rows:/);
   assert.match(appSource, /Needs review:/);
@@ -5937,6 +5969,647 @@ async function verifyDeviceSignalPermissionRationale() {
   }
 }
 
+function createLocationSuggestionRow({
+  placeName = "Acme Cafe",
+  vendor = null,
+  category = null,
+  date = "2026-07-08",
+  net = 20,
+  vat = 4,
+  gross = 24,
+  latitude = 51.5074,
+  longitude = -0.1278,
+  includeLocation = true,
+} = {}) {
+  const fields = {
+    category,
+    date,
+    gross,
+    net,
+    vat,
+    vendor,
+  };
+  const validationIssues = [];
+  for (const field of ["vendor", "date", "net", "vat", "gross", "category"]) {
+    if (fields[field] === null || fields[field] === undefined) {
+      validationIssues.push({
+        field,
+        message: `${field} is missing.`,
+        type: "missing-field",
+      });
+    }
+  }
+
+  return {
+    capturedAt: "2026-07-08T10:30:00.000Z",
+    source: "camera",
+    sourceUri: "file://acme-cafe.jpg",
+    context: {
+      capturedAt: "2026-07-08T10:30:00.000Z",
+      source: "camera",
+      location: includeLocation
+        ? {
+            city: "London",
+            country: "United Kingdom",
+            latitude,
+            longitude,
+            placeName,
+            region: "England",
+          }
+        : undefined,
+    },
+    fields,
+    validation: {
+      issues: validationIssues,
+      needsReview: validationIssues.length > 0,
+    },
+  };
+}
+
+async function verifyLocationFieldSuggestionFromPlace() {
+  await withNetworkBlocked(async () => {
+    // --- AC1: deterministic pure derivation (no network) ---
+    const acmeRow = createLocationSuggestionRow({
+      placeName: "Acme Cafe",
+      vendor: null,
+      category: null,
+    });
+    const first = deriveLocationFieldSuggestion(acmeRow);
+    const second = deriveLocationFieldSuggestion(acmeRow);
+    assert.deepEqual(first, { vendor: "Acme Cafe", category: "Meals" });
+    assert.deepEqual(second, first);
+    assert.deepEqual(second, { vendor: "Acme Cafe", category: "Meals" });
+
+    // Every keyword + adversarial cases (v2 matcher table)
+    const keywordCases = [
+      ["Local Cafe", "Meals"],
+      ["Coffee House", "Meals"],
+      ["Italian Restaurant", "Meals"],
+      ["All Day Diner", "Meals"],
+      ["Corner Bistro", "Meals"],
+      ["Open Kitchen", "Meals"],
+      ["Village Pub", "Meals"],
+      ["Joe's Bar", "Meals"],
+      ["Grand Hotel", "Travel"],
+      ["Country Inn", "Travel"],
+      ["Mountain Lodge", "Travel"],
+      ["City Airport", "Travel"],
+      ["Kings Cross Station", "Travel"],
+      ["Fuel Stop", "Travel"],
+      ["Shell Petrol", "Travel"],
+      ["Express Garage", "Travel"],
+      ["Main Office", "Office"],
+      ["Ryman Stationery", "Office"],
+      ["Office Supplies", "Office"],
+      ["Quick Print", "Office"],
+      ["Copy Shop", "Office"],
+    ];
+    for (const [place, expectedCategory] of keywordCases) {
+      const suggestion = deriveLocationFieldSuggestion(
+        createLocationSuggestionRow({
+          placeName: place,
+          vendor: null,
+          category: null,
+        }),
+      );
+      assert.equal(
+        suggestion?.category,
+        expectedCategory,
+        `keyword place "${place}"`,
+      );
+      assert.equal(suggestion?.vendor, place);
+    }
+
+    const adversarial = [
+      ["Ryman Stationery", "Office"],
+      ["Kings Cross Station", "Travel"],
+      ["Barbers of London", null],
+      ["Printworks Ltd", null],
+      ["The Dinner Club", null],
+      ["Innsbruck Hotel", "Travel"],
+      ["CAFÉ ROUGE", "Meals"],
+      ["Hôtel Bristol", "Travel"],
+      ["Garage Bar", "Meals"],
+      ["Station Cafe", "Meals"],
+      ["Zzz Widgets Ltd", null],
+      ["Barça Market", null],
+      ["Cafébar", null],
+      ["stationér", null],
+      ["Coffee-Bar", "Meals"],
+      ["Office Cafe", "Meals"],
+      ["Bar123", null],
+      ["123Bar", null],
+      ["咖啡Bar", null],
+      ["cafe\u200Dbar", null], // ZWJ
+      ["Bar 123", "Meals"],
+      ["bar\u1AB0ca", null], // U+1AB0
+      ["bar\u093Eca", null], // Devanagari vowel sign
+      ["Bar\u200Dca", null], // ZWJ
+      ["station\uFE20ery", "Office"], // U+FE20 -> stationery
+      ["station\u200Cery", "Office"], // ZWNJ -> stationery
+      ["station\u2060ery", "Office"], // WORD JOINER
+      ["station\u00ADery", "Office"], // soft hyphen
+      ["Co\uFB00ee", "Meals"], // ligature ﬀ
+      ["O\uFB03ce", "Office"], // ligature ﬃ
+      ["Cafebar", null],
+    ];
+    for (const [place, expectedCategory] of adversarial) {
+      const suggestion = deriveLocationFieldSuggestion(
+        createLocationSuggestionRow({
+          placeName: place,
+          vendor: null,
+          category: null,
+        }),
+      );
+      if (expectedCategory === null) {
+        assert.equal(
+          suggestion?.category,
+          undefined,
+          `adversarial "${place}" must omit category`,
+        );
+        assert.equal(suggestion?.vendor, place.trim() || place);
+      } else {
+        assert.equal(
+          suggestion?.category,
+          expectedCategory,
+          `adversarial "${place}"`,
+        );
+      }
+    }
+
+    // No location -> null
+    assert.equal(
+      deriveLocationFieldSuggestion(
+        createLocationSuggestionRow({ includeLocation: false }),
+      ),
+      null,
+    );
+    assert.equal(
+      deriveLocationFieldSuggestion({
+        fields: { vendor: null, category: null },
+        context: { location: null },
+      }),
+      null,
+    );
+    // placeName null (coords-only capture) -> null
+    assert.equal(
+      deriveLocationFieldSuggestion({
+        fields: { vendor: null, category: null },
+        context: {
+          location: {
+            latitude: 51.5,
+            longitude: -0.1,
+            placeName: null,
+          },
+        },
+      }),
+      null,
+    );
+
+    // --- mergeEnrichedReceiptContext behavioural (replaces hollow source regex) ---
+    const expectedReceipt = {
+      capturedAt: "2026-07-08T10:30:00.000Z",
+      source: "camera",
+      sourceUri: "file://acme-cafe.jpg",
+      fields: { vendor: null, category: null, date: "2026-07-08", net: 20, vat: 4, gross: 24 },
+      context: {
+        capturedAt: "2026-07-08T10:30:00.000Z",
+        source: "camera",
+        location: {
+          latitude: 51.5074,
+          longitude: -0.1278,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+    };
+    const enrichedReceipt = {
+      ...expectedReceipt,
+      context: {
+        ...expectedReceipt.context,
+        location: {
+          latitude: 51.5074,
+          longitude: -0.1278,
+          placeName: "Acme Cafe",
+          city: "London",
+          region: "England",
+          country: "United Kingdom",
+        },
+      },
+    };
+    assert.equal(
+      isSameReviewedReceipt(expectedReceipt, expectedReceipt),
+      true,
+    );
+    assert.equal(
+      isSameReviewedReceipt(
+        { ...expectedReceipt, sourceUri: "file://other.jpg" },
+        expectedReceipt,
+      ),
+      false,
+    );
+    const mergedRows = mergeEnrichedReceiptContext(
+      [expectedReceipt],
+      expectedReceipt,
+      enrichedReceipt,
+    );
+    assert.equal(mergedRows[0].context.location.placeName, "Acme Cafe");
+    // Wrong receipt identity -> no merge
+    const skipped = mergeEnrichedReceiptContext(
+      [{ ...expectedReceipt, sourceUri: "file://other.jpg" }],
+      expectedReceipt,
+      enrichedReceipt,
+    );
+    assert.equal(skipped[0].context.location.placeName, null);
+
+    // --- AC1-integration: real production chain ---
+    const captureImage = {
+      capturedAt: "2026-07-08T10:30:00.000Z",
+      mimeType: "image/jpeg",
+      source: "camera",
+      uri: "file://acme-cafe.jpg",
+      context: {
+        location: {
+          latitude: 51.5074,
+          longitude: -0.1278,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+    };
+    const vision = createReceiptClient({
+      confidences: {
+        category: 0.1,
+        date: 0.97,
+        gross: 0.98,
+        net: 0.96,
+        vat: 0.95,
+        vendor: 0.1,
+      },
+      fields: {
+        category: null,
+        date: "2026-07-08",
+        gross: "24.00",
+        net: "20.00",
+        vat: "4.00",
+        vendor: null,
+      },
+    });
+    const outcome = await attemptReceiptExtraction(captureImage, { vision });
+    assert.equal(outcome.status, "succeeded");
+    let rows = resolveReviewQueueAfterExtraction([], outcome);
+    assert.equal(rows[0].context.location.placeName, null);
+    assert.equal(deriveLocationFieldSuggestion(rows[0]), null);
+
+    const { enrichedReceipt: chainEnriched } = await buildEnrichedLocationSuggestion({
+      enrich: enrichReceipt,
+      enrichOptions: {
+        events: [],
+        location: {
+          async getCurrentPositionAsync() {
+            return { coords: { latitude: 0, longitude: 0 } };
+          },
+          async requestForegroundPermissionsAsync() {
+            return { granted: false };
+          },
+          async reverseGeocodeAsync() {
+            return [
+              {
+                city: "London",
+                country: "United Kingdom",
+                name: "Acme Cafe",
+                region: "England",
+              },
+            ];
+          },
+        },
+      },
+      platform: "ios",
+      receipt: outcome.row,
+      session: null,
+      userId: "test@example.com",
+    });
+    rows = mergeEnrichedReceiptContext(rows, outcome.row, chainEnriched);
+    const afterMerge = deriveLocationFieldSuggestion(rows[0]);
+    assert.deepEqual(afterMerge, {
+      vendor: "Acme Cafe",
+      category: "Meals",
+    });
+    // Apply re-derives + applyCorrection
+    const applied = applyCorrection(
+      rows,
+      0,
+      deriveLocationFieldSuggestion(rows[0]),
+    );
+    assert.equal(applied[0].fields.vendor, "Acme Cafe");
+    assert.equal(applied[0].fields.category, "Meals");
+
+    // --- APP BINDING (source-level; no renderer — issue #20) ---
+    // Import without call, and call without import, must both fail.
+    // Lib-level chain tests merge themselves; they cannot see App wiring.
+    const appSource = fs.readFileSync("App.js", "utf8");
+    assert.match(
+      appSource,
+      /import \{\s*mergeEnrichedReceiptContext\s*\} from "\.\/src\/lib\/reviewRowMerge"/,
+    );
+    assert.match(
+      appSource,
+      /setReviewedReceipts\(\(currentRows\) =>\s*mergeEnrichedReceiptContext\(\s*currentRows,\s*outcome\.row,\s*enrichedReceipt\s*,?\s*\)/,
+    );
+    assert.match(
+      appSource,
+      /import \{\s*deriveLocationFieldSuggestion\s*\} from "\.\/src\/lib\/locationFieldSuggestion"/,
+    );
+    assert.match(
+      appSource,
+      /const locationFieldSuggestion = extractedReceipt\s*\?\s*deriveLocationFieldSuggestion\(extractedReceipt\)/,
+    );
+    assert.match(
+      appSource,
+      /setReviewedReceipts\(\(currentRows\) =>\s*\{[\s\S]*?const freshSuggestion = deriveLocationFieldSuggestion\(currentRows\[0\]\);[\s\S]*?return applyCorrection\(currentRows,\s*0,\s*freshSuggestion\);/,
+    );
+    assert.match(
+      appSource,
+      /accessibilityLabel="Apply suggested vendor and category"/,
+    );
+    assert.match(appSource, /onPress=\{handleApplyLocationFieldSuggestion\}/);
+    assert.match(appSource, /accessibilityRole="button"/);
+    assert.match(appSource, /Apply suggestion/);
+
+    // --- AC2: OCR fields unchanged / never overwrite / emptiness / staleness / CLEAR ---
+    const ocrSnapshot = {
+      category: "Meals, team",
+      date: "2026-07-08",
+      gross: 24,
+      net: 20,
+      vat: 4,
+      vendor: "OCR Vendor",
+    };
+    // No context -> no suggestion; fields untouched
+    const noContextRow = {
+      fields: { ...ocrSnapshot },
+      context: {},
+      validation: { issues: [], needsReview: false },
+    };
+    assert.equal(deriveLocationFieldSuggestion(noContextRow), null);
+    assert.deepEqual(noContextRow.fields, ocrSnapshot);
+
+    // Context present, suggestion not applied -> fields still OCR snapshot
+    const contextUnapplied = createLocationSuggestionRow({
+      placeName: "Acme Cafe",
+      vendor: "OCR Vendor",
+      category: "Meals, team",
+    });
+    contextUnapplied.fields = { ...ocrSnapshot };
+    const shown = deriveLocationFieldSuggestion(contextUnapplied);
+    // vendor and category already filled -> omit both -> null
+    assert.equal(shown, null);
+    assert.deepEqual(contextUnapplied.fields, ocrSnapshot);
+
+    // NEVER-OVERWRITE: OCR has vendor/category -> suggestion omits them
+    const filled = createLocationSuggestionRow({
+      placeName: "Acme Cafe",
+      vendor: "OCR Vendor",
+      category: "Meals, team",
+    });
+    assert.equal(deriveLocationFieldSuggestion(filled), null);
+    const afterNoOpApply = applyCorrection(
+      [filled],
+      0,
+      deriveLocationFieldSuggestion(filled) || {},
+    );
+    assert.deepEqual(afterNoOpApply[0].fields.vendor, "OCR Vendor");
+    assert.deepEqual(afterNoOpApply[0].fields.category, "Meals, team");
+
+    // Emptiness matrix: undefined, null, "", "   " all empty
+    for (const empty of [undefined, null, "", "   "]) {
+      const emptyRow = createLocationSuggestionRow({
+        placeName: "Acme Cafe",
+        vendor: empty,
+        category: empty,
+      });
+      emptyRow.fields.vendor = empty;
+      emptyRow.fields.category = empty;
+      assert.deepEqual(
+        deriveLocationFieldSuggestion(emptyRow),
+        { vendor: "Acme Cafe", category: "Meals" },
+        `empty value ${JSON.stringify(empty)}`,
+      );
+    }
+
+    // STALENESS: show suggestion, manual vendor edit, THEN Apply -> manual wins
+    let staleRows = [
+      createLocationSuggestionRow({
+        placeName: "Acme Cafe",
+        vendor: null,
+        category: null,
+      }),
+    ];
+    assert.deepEqual(deriveLocationFieldSuggestion(staleRows[0]), {
+      vendor: "Acme Cafe",
+      category: "Meals",
+    });
+    staleRows = applyCorrection(staleRows, 0, { vendor: "Manual Vendor" });
+    const reDerived = deriveLocationFieldSuggestion(staleRows[0]);
+    assert.deepEqual(reDerived, { category: "Meals" });
+    assert.equal(reDerived.vendor, undefined);
+    staleRows = applyCorrection(staleRows, 0, reDerived);
+    assert.equal(staleRows[0].fields.vendor, "Manual Vendor");
+    assert.equal(staleRows[0].fields.category, "Meals");
+
+    // CLEAR: location null -> derivation null; fields unchanged
+    const clearBase = createLocationSuggestionRow({
+      placeName: "Acme Cafe",
+      vendor: null,
+      category: null,
+    });
+    const ocrFieldsBeforeClear = { ...clearBase.fields };
+    const cleared = applyReceiptContextDecision(
+      [clearBase],
+      0,
+      CONTEXT_REVIEW_DECISIONS.CLEAR,
+    );
+    assert.equal(cleared[0].context.location, null);
+    assert.equal(deriveLocationFieldSuggestion(cleared[0]), null);
+    assert.deepEqual(cleared[0].fields, ocrFieldsBeforeClear);
+
+    // --- AC3: three distinct export baselines ---
+    const exportBase = createLocationSuggestionRow({
+      placeName: "Acme Cafe",
+      vendor: null,
+      category: null,
+      date: "2026-07-08",
+      net: 20,
+      vat: 4,
+      gross: 24,
+    });
+    // Fill only amounts/date so missing vendor+category keep needs_review until apply
+    exportBase.fields = {
+      vendor: null,
+      category: null,
+      date: "2026-07-08",
+      net: 20,
+      vat: 4,
+      gross: 24,
+    };
+    exportBase.validation = {
+      issues: [
+        { field: "vendor", message: "vendor is missing.", type: "missing-field" },
+        {
+          field: "category",
+          message: "category is missing.",
+          type: "missing-field",
+        },
+      ],
+      needsReview: true,
+    };
+
+    // (i) suggestion shown but NOT applied
+    const unappliedSuggestion = deriveLocationFieldSuggestion(exportBase);
+    assert.deepEqual(unappliedSuggestion, {
+      vendor: "Acme Cafe",
+      category: "Meals",
+    });
+    const sameContextCsv = buildReceiptSheet([exportBase]).csv.split("\n")[1];
+    assert.equal(
+      sameContextCsv,
+      [
+        "",
+        "2026-07-08",
+        "20",
+        "4",
+        "24",
+        "",
+        "Acme Cafe",
+        "",
+        "",
+        "",
+        "file://acme-cafe.jpg",
+        "needs_review",
+        "vendor is missing.; category is missing.",
+      ].join(","),
+    );
+
+    // (ii) after CLEAR — blank location cell (established cleared baseline)
+    const clearedExport = applyReceiptContextDecision(
+      [exportBase],
+      0,
+      CONTEXT_REVIEW_DECISIONS.CLEAR,
+    );
+    const clearedCsv = buildReceiptSheet(clearedExport).csv.split("\n")[1];
+    assert.equal(
+      clearedCsv,
+      [
+        "",
+        "2026-07-08",
+        "20",
+        "4",
+        "24",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "file://acme-cafe.jpg",
+        "needs_review",
+        "vendor is missing.; category is missing.",
+      ].join(","),
+    );
+    assert.notEqual(clearedCsv, sameContextCsv);
+
+    // (iii) after explicit APPLY — full row lock (status flips to ready)
+    const appliedExport = applyCorrection(
+      [exportBase],
+      0,
+      deriveLocationFieldSuggestion(exportBase),
+    );
+    assert.equal(appliedExport[0].validation.needsReview, false);
+    assert.deepEqual(appliedExport[0].validation.issues, []);
+    const appliedCsvLine = buildReceiptSheet(appliedExport).csv.split("\n")[1];
+    const expectedAppliedRow = [
+      "Acme Cafe",
+      "2026-07-08",
+      "20",
+      "4",
+      "24",
+      "Meals",
+      "Acme Cafe",
+      "",
+      "",
+      "",
+      "file://acme-cafe.jpg",
+      "ready",
+      "",
+    ].join(",");
+    assert.equal(appliedCsvLine, expectedAppliedRow);
+
+    // ZIP CSV path via exportReviewedReceipts
+    const zipWrites = [];
+    const zipResult = await exportReviewedReceipts(appliedExport, {
+      filename: "location-suggest-pack",
+      async share() {},
+      async writeFile(uri, contents) {
+        zipWrites.push({ contents, uri });
+      },
+    });
+    const zipPack = readZipBundle(zipWrites[0].contents);
+    const zipCsv = zipPack.byName["location-suggest-pack.csv"].toString("utf8");
+    assert.equal(zipCsv.split("\n")[1], expectedAppliedRow);
+    assert.equal(zipResult.sheet.csv.split("\n")[1], expectedAppliedRow);
+
+    // XLSX path — lock all 13 data cells
+    const xlsxWrites = [];
+    await exportReviewedReceipts(appliedExport, {
+      filename: "location-suggest-pack",
+      format: "xlsx",
+      async share() {},
+      async writeFile(uri, contents) {
+        xlsxWrites.push({ contents, uri });
+      },
+    });
+    const xlsxBook = XLSX.read(xlsxWrites[0].contents, { type: "base64" });
+    const sheet = xlsxBook.Sheets.Receipts;
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    assert.deepEqual(matrix[0], EXPECTED_EXPORT_COLUMNS);
+    assert.deepEqual(
+      matrix[1].map((cell) => String(cell)),
+      [
+        "Acme Cafe",
+        "2026-07-08",
+        "20",
+        "4",
+        "24",
+        "Meals",
+        "Acme Cafe",
+        "",
+        "",
+        "",
+        "file://acme-cafe.jpg",
+        "ready",
+        "",
+      ],
+    );
+
+    // Unapplied export still has OCR-empty vendor/category
+    const unappliedZip = [];
+    await exportReviewedReceipts([exportBase], {
+      filename: "unapplied-suggest",
+      async share() {},
+      async writeFile(uri, contents) {
+        unappliedZip.push({ contents, uri });
+      },
+    });
+    const unappliedCsv = readZipBundle(unappliedZip[0].contents).byName[
+      "unapplied-suggest.csv"
+    ].toString("utf8");
+    assert.equal(unappliedCsv.split("\n")[1], sameContextCsv);
+  });
+}
+
 async function main() {
   verifyScaffoldFiles();
   verifyMissingConfigDoesNotCrash();
@@ -5975,6 +6648,7 @@ async function main() {
   verifyIntegrationUiSource();
   await verifyFlakyNetworkExtraction();
   verifyE2EHarnessSource();
+  await verifyLocationFieldSuggestionFromPlace();
   console.log("Acceptance checks passed.");
 }
 

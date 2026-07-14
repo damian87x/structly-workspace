@@ -62,8 +62,9 @@ import {
   CONTEXT_REVIEW_DECISIONS,
   applyReceiptContextDecision,
   getReceiptContextDisplay,
-  mergeReceiptContextSuggestion,
 } from "./src/lib/receiptContextReview";
+import { deriveLocationFieldSuggestion } from "./src/lib/locationFieldSuggestion";
+import { mergeEnrichedReceiptContext } from "./src/lib/reviewRowMerge";
 
 const AMOUNT_RECEIPT_FIELDS = ["net", "vat", "gross"];
 const PACK_STATUS_LABELS = {
@@ -89,31 +90,6 @@ function formatFieldValue(value) {
 
 function formatMoney(value) {
   return Number.isFinite(value) ? value.toFixed(2) : "0.00";
-}
-
-function isSameReviewedReceipt(currentReceipt, expectedReceipt) {
-  return (
-    currentReceipt?.capturedAt === expectedReceipt.capturedAt &&
-    currentReceipt?.source === expectedReceipt.source &&
-    currentReceipt?.sourceUri === expectedReceipt.sourceUri
-  );
-}
-
-function mergeEnrichedReceiptContext(currentRows, expectedReceipt, enrichedReceipt) {
-  const currentReceipt = currentRows[0];
-
-  if (
-    !currentReceipt ||
-    !enrichedReceipt?.context ||
-    !isSameReviewedReceipt(currentReceipt, expectedReceipt)
-  ) {
-    return currentRows;
-  }
-
-  return [
-    mergeReceiptContextSuggestion(currentReceipt, enrichedReceipt.context),
-    ...currentRows.slice(1),
-  ];
 }
 
 export default function App() {
@@ -350,6 +326,9 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     : [];
   const receiptContext = extractedReceipt
     ? getReceiptContextDisplay(extractedReceipt)
+    : null;
+  const locationFieldSuggestion = extractedReceipt
+    ? deriveLocationFieldSuggestion(extractedReceipt)
     : null;
 
   useEffect(() => {
@@ -647,6 +626,24 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setReviewedReceipts((currentRows) =>
       applyLocationSuggestionToReceipt(currentRows, 0, suggestionEvent),
     );
+  }
+
+  function handleApplyLocationFieldSuggestion() {
+    setExportError(null);
+    setExportResult(null);
+    setReviewedReceipts((currentRows) => {
+      if (currentRows.length === 0) {
+        return currentRows;
+      }
+
+      // RE-DERIVE from the CURRENT row (not a stale closure capture).
+      const freshSuggestion = deriveLocationFieldSuggestion(currentRows[0]);
+      if (!freshSuggestion) {
+        return currentRows;
+      }
+
+      return applyCorrection(currentRows, 0, freshSuggestion);
+    });
   }
 
   function handleReceiptContextDecision(decision) {
@@ -1211,6 +1208,40 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                       </Text>
                     </Pressable>
                   </View>
+                  {locationFieldSuggestion ? (
+                    <View style={styles.locationFieldSuggestion}>
+                      <Text style={styles.panelTitle}>Suggested from place</Text>
+                      {locationFieldSuggestion.vendor ? (
+                        <View style={styles.extractedFieldRow}>
+                          <Text style={styles.label}>Suggested vendor</Text>
+                          <Text style={styles.extractedFieldValue}>
+                            {locationFieldSuggestion.vendor}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {locationFieldSuggestion.category ? (
+                        <View style={styles.extractedFieldRow}>
+                          <Text style={styles.label}>Suggested category</Text>
+                          <Text style={styles.extractedFieldValue}>
+                            {locationFieldSuggestion.category}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Pressable
+                        accessibilityLabel="Apply suggested vendor and category"
+                        accessibilityRole="button"
+                        onPress={handleApplyLocationFieldSuggestion}
+                        style={({ pressed }) => [
+                          styles.secondaryButton,
+                          pressed ? styles.secondaryButtonPressed : null,
+                        ]}
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          Apply suggestion
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
               <View style={styles.actionRow}>
@@ -1443,6 +1474,13 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 6,
     paddingTop: 14,
+  },
+  locationFieldSuggestion: {
+    borderTopColor: "#E5E7EB",
+    borderTopWidth: 1,
+    gap: 10,
+    marginTop: 4,
+    paddingTop: 12,
   },
   contextToggleButton: {
     alignItems: "center",
