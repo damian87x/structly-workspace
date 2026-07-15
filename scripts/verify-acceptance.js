@@ -1,5 +1,7 @@
 const assert = require("assert");
 const fs = require("fs");
+const Module = require("module");
+const path = require("path");
 const XLSX = require("xlsx");
 
 const {
@@ -608,6 +610,11 @@ async function verifyReceiptCaptureModule() {
   assert.equal(calls[1][0], "launchCamera");
   assert.equal(calls[1][1].mediaTypes, "Images");
   assert.equal(calls[1][1].quality, 0.9);
+  // CAMERA-LEAK GUARD: shared getImageOptions must not gain exif (library-only).
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(calls[1][1], "exif"),
+    false,
+  );
   assert.deepEqual(calls[2], ["requestLocation"]);
   assert.deepEqual(calls[3], ["getCapturePosition", {}]);
 
@@ -617,10 +624,13 @@ async function verifyReceiptCaptureModule() {
   assert.equal(libraryResult.receipt.capturedAt, libraryCreationTime);
   assert.equal(libraryResult.receipt.source, "library");
   assert.equal(libraryResult.receipt.uri, "file://receipt-library.png");
+  // No EXIF on this asset -> no context key (not empty object).
+  assert.equal(libraryResult.receipt.context, undefined);
   assert.deepEqual(calls[4], ["requestLibrary", false]);
   assert.equal(calls[5][0], "launchLibrary");
   assert.equal(calls[5][1].mediaTypes, "Images");
   assert.equal(calls[5][1].quality, 0.9);
+  assert.equal(calls[5][1].exif, true);
 
   const libraryWithoutCreationTimeResult = await pickReceiptFromLibrary({
     imagePicker: {
@@ -736,6 +746,572 @@ async function verifyReceiptCaptureModule() {
   });
   assert.equal(emptyCameraResult.status, "empty");
   assert.deepEqual(emptyLocationCalls, []);
+}
+
+function makeLibraryPicker(asset, captureOptions) {
+  return {
+    MediaTypeOptions: { Images: "Images" },
+    async launchImageLibraryAsync(options) {
+      if (captureOptions) {
+        captureOptions.push(options);
+      }
+      return {
+        assets: [asset],
+        canceled: false,
+      };
+    },
+    async requestMediaLibraryPermissionsAsync() {
+      return { granted: true };
+    },
+  };
+}
+
+async function verifyGalleryExifGps() {
+  await withNetworkBlocked(async () => {
+    const expectedLocation = {
+      latitude: -33.9,
+      longitude: -18.4,
+      placeName: null,
+      city: null,
+      region: null,
+      country: null,
+    };
+
+    // --- AC1: EXIF GPS attaches context (hemisphere + platform cases) ---
+    const ac1Cases = [
+      {
+        name: "iOS magnitude S/W",
+        exif: {
+          GPSLatitude: 33.9,
+          GPSLatitudeRef: "S",
+          GPSLongitude: 18.4,
+          GPSLongitudeRef: "W",
+        },
+        expected: expectedLocation,
+      },
+      {
+        name: "Android signed S/W (anti-double-negation)",
+        exif: {
+          GPSLatitude: -33.9,
+          GPSLatitudeRef: "S",
+          GPSLongitude: -18.4,
+          GPSLongitudeRef: "W",
+        },
+        expected: expectedLocation,
+      },
+      {
+        name: "iOS magnitude N/E",
+        exif: {
+          GPSLatitude: 51.5,
+          GPSLatitudeRef: "N",
+          GPSLongitude: 0.12,
+          GPSLongitudeRef: "E",
+        },
+        expected: {
+          latitude: 51.5,
+          longitude: 0.12,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+      {
+        name: "lowercase refs",
+        exif: {
+          GPSLatitude: 33.9,
+          GPSLatitudeRef: "s",
+          GPSLongitude: 18.4,
+          GPSLongitudeRef: "w",
+        },
+        expected: expectedLocation,
+      },
+      {
+        name: "DMS array",
+        exif: {
+          GPSLatitude: [51, 30, 0],
+          GPSLatitudeRef: "N",
+          GPSLongitude: [0, 7, 30],
+          GPSLongitudeRef: "W",
+        },
+        expected: {
+          latitude: 51.5,
+          longitude: -0.125,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+      {
+        name: "equator lat 0 alone is real",
+        exif: {
+          GPSLatitude: 0,
+          GPSLatitudeRef: "N",
+          GPSLongitude: 18.4,
+          GPSLongitudeRef: "W",
+        },
+        expected: {
+          latitude: 0,
+          longitude: -18.4,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+      {
+        name: "Greenwich lng 0 alone is real",
+        exif: {
+          GPSLatitude: 51.5,
+          GPSLatitudeRef: "N",
+          GPSLongitude: 0,
+          GPSLongitudeRef: "E",
+        },
+        expected: {
+          latitude: 51.5,
+          longitude: 0,
+          placeName: null,
+          city: null,
+          region: null,
+          country: null,
+        },
+      },
+    ];
+
+    for (const testCase of ac1Cases) {
+      const optionsSeen = [];
+      const result = await pickReceiptFromLibrary({
+        imagePicker: makeLibraryPicker(
+          {
+            fileName: "exif-import.jpg",
+            height: 100,
+            mimeType: "image/jpeg",
+            uri: "file://exif-import.jpg",
+            width: 80,
+            exif: testCase.exif,
+          },
+          optionsSeen,
+        ),
+      });
+      assert.equal(result.status, "selected", testCase.name);
+      assert.equal(result.error, null, testCase.name);
+      assert.equal(optionsSeen[0].exif, true, `${testCase.name} options.exif`);
+      assert.deepEqual(
+        result.receipt.context.location,
+        testCase.expected,
+        testCase.name,
+      );
+    }
+
+    // --- AC2: no/partial/bogus EXIF keeps location empty ---
+    const ac2Cases = [
+      { name: "absent exif", asset: { uri: "file://a.jpg" } },
+      {
+        name: "empty exif",
+        asset: { uri: "file://a.jpg", exif: {} },
+      },
+      {
+        name: "lat only",
+        asset: {
+          uri: "file://a.jpg",
+          exif: { GPSLatitude: 33.9, GPSLatitudeRef: "S" },
+        },
+      },
+      {
+        name: "missing lat ref",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 33.9,
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+      {
+        name: "missing lng ref",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 33.9,
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+          },
+        },
+      },
+      {
+        name: "wrong-axis lat ref E",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 33.9,
+            GPSLatitudeRef: "E",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+      {
+        name: "wrong-axis lng ref N",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 33.9,
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "N",
+          },
+        },
+      },
+      {
+        name: "Null Island (0,0)",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 0,
+            GPSLatitudeRef: "N",
+            GPSLongitude: 0,
+            GPSLongitudeRef: "E",
+          },
+        },
+      },
+      {
+        name: "out-of-range lat",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: 200,
+            GPSLatitudeRef: "N",
+            GPSLongitude: 0,
+            GPSLongitudeRef: "E",
+          },
+        },
+      },
+      {
+        name: "string value",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: "33.9",
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+      {
+        name: "NaN",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: NaN,
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+      {
+        name: "Infinity",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: Infinity,
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+      {
+        name: "malformed DMS min=60",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: [51, 60, 0],
+            GPSLatitudeRef: "N",
+            GPSLongitude: 0.1,
+            GPSLongitudeRef: "E",
+          },
+        },
+      },
+      {
+        name: "exif is string",
+        asset: { uri: "file://a.jpg", exif: "not-an-object" },
+      },
+      {
+        name: "GPSLatitude is object",
+        asset: {
+          uri: "file://a.jpg",
+          exif: {
+            GPSLatitude: { deg: 33 },
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        },
+      },
+    ];
+
+    for (const testCase of ac2Cases) {
+      const result = await pickReceiptFromLibrary({
+        imagePicker: makeLibraryPicker({
+          fileName: "bogus.jpg",
+          height: 10,
+          mimeType: "image/jpeg",
+          width: 10,
+          ...testCase.asset,
+        }),
+      });
+      assert.equal(result.status, "selected", testCase.name);
+      assert.equal(result.error, null, testCase.name);
+      assert.equal(
+        result.receipt.context?.location,
+        undefined,
+        `${testCase.name} no location`,
+      );
+      assert.equal(
+        result.receipt.context,
+        undefined,
+        `${testCase.name} no context key`,
+      );
+    }
+
+    // --- Function-body scan: library path must not touch current-position ---
+    // Brace-count extract so nested if/return blocks do not truncate the body.
+    const captureSource = fs.readFileSync(
+      require.resolve("../src/lib/receiptCapture"),
+      "utf8",
+    );
+    const fnStart = captureSource.indexOf("async function pickReceiptFromLibrary");
+    assert.ok(fnStart >= 0, "pickReceiptFromLibrary found");
+    const braceStart = captureSource.indexOf("{", fnStart);
+    let depth = 0;
+    let fnEnd = -1;
+    for (let i = braceStart; i < captureSource.length; i += 1) {
+      const ch = captureSource[i];
+      if (ch === "{") {
+        depth += 1;
+      } else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          fnEnd = i;
+          break;
+        }
+      }
+    }
+    assert.ok(fnEnd > braceStart, "pickReceiptFromLibrary body closed");
+    const libraryBody = captureSource.slice(fnStart, fnEnd + 1);
+    for (const symbol of [
+      "getDefaultLocation",
+      "getCapturedLocation",
+      "getCurrentPositionAsync",
+      "requestForegroundPermissionsAsync",
+      "expo-location",
+      "locationContext",
+    ]) {
+      assert.equal(
+        libraryBody.includes(symbol),
+        false,
+        `pickReceiptFromLibrary must not reference ${symbol}`,
+      );
+    }
+
+    // --- AC3: Module._load interception (hook-traversing positive control) ---
+    const originalLoad = Module._load;
+    const loads = [];
+    const currentPositionCalls = [];
+    const locationSentinel = {
+      async requestForegroundPermissionsAsync() {
+        currentPositionCalls.push("requestForegroundPermissionsAsync");
+        return { status: "granted" };
+      },
+      async getCurrentPositionAsync() {
+        currentPositionCalls.push("getCurrentPositionAsync");
+        return {
+          coords: { latitude: 51.5, longitude: -0.12 },
+        };
+      },
+    };
+    const defaultPickerFake = {
+      MediaTypeOptions: { Images: "Images" },
+      async requestCameraPermissionsAsync() {
+        return { granted: true };
+      },
+      async requestMediaLibraryPermissionsAsync() {
+        return { granted: true };
+      },
+      async launchCameraAsync() {
+        return {
+          assets: [
+            {
+              fileName: "control-camera.jpg",
+              height: 10,
+              mimeType: "image/jpeg",
+              uri: "file://control-camera.jpg",
+              width: 10,
+            },
+          ],
+          canceled: false,
+        };
+      },
+      async launchImageLibraryAsync() {
+        return { assets: [], canceled: false };
+      },
+    };
+
+    function bustSrcLibCache() {
+      for (const key of Object.keys(require.cache)) {
+        if (key.includes(`${path.sep}src${path.sep}lib${path.sep}`)) {
+          delete require.cache[key];
+        }
+      }
+    }
+
+    try {
+      Module._load = function patchedLoad(request, parent, isMain) {
+        if (request === "expo-location") {
+          loads.push("expo-location");
+          return locationSentinel;
+        }
+        if (request === "expo-image-picker") {
+          loads.push("expo-image-picker");
+          return defaultPickerFake;
+        }
+        return originalLoad.call(this, request, parent, isMain);
+      };
+
+      bustSrcLibCache();
+      const captureForControl = require("../src/lib/receiptCapture");
+
+      // HOOK-TRAVERSING POSITIVE CONTROL: all-defaults camera path hits lazy
+      // require("expo-location") through the shim.
+      const control = await captureForControl.takeReceiptPhoto({});
+      assert.equal(control.status, "selected", "AC3 control status");
+      assert.ok(
+        loads.includes("expo-location"),
+        "AC3 positive control: expo-location must load via shim",
+      );
+      assert.ok(
+        currentPositionCalls.includes("requestForegroundPermissionsAsync"),
+        "AC3 positive control: requestForegroundPermissionsAsync called",
+      );
+      assert.ok(
+        currentPositionCalls.includes("getCurrentPositionAsync"),
+        "AC3 positive control: getCurrentPositionAsync called",
+      );
+
+      // Reset recorders; keep shim installed through the library assertion.
+      loads.length = 0;
+      currentPositionCalls.length = 0;
+
+      bustSrcLibCache();
+      const captureForLibrary = require("../src/lib/receiptCapture");
+
+      const imported = await captureForLibrary.pickReceiptFromLibrary({
+        imagePicker: makeLibraryPicker({
+          fileName: "ac3-import.jpg",
+          height: 100,
+          mimeType: "image/jpeg",
+          uri: "file://ac3-import.jpg",
+          width: 80,
+          exif: {
+            GPSLatitude: 33.9,
+            GPSLatitudeRef: "S",
+            GPSLongitude: 18.4,
+            GPSLongitudeRef: "W",
+          },
+        }),
+      });
+
+      assert.equal(imported.status, "selected", "AC3 library status");
+      assert.deepEqual(
+        loads.filter((name) => name === "expo-location"),
+        [],
+        "AC3 library must not load expo-location",
+      );
+      assert.deepEqual(
+        currentPositionCalls,
+        [],
+        "AC3 library must not call current-position APIs",
+      );
+      assert.deepEqual(imported.receipt.context.location, expectedLocation);
+
+      // enrichReceipt early-returns for non-camera; sentinel must stay quiet.
+      const { enrichReceipt: enrichReloaded } = require("../src/lib/enrichReceipt");
+      let enrichProviderCalls = 0;
+      const enriched = await enrichReloaded(imported.receipt, {
+        location: {
+          async requestForegroundPermissionsAsync() {
+            enrichProviderCalls += 1;
+            return { status: "granted" };
+          },
+          async getCurrentPositionAsync() {
+            enrichProviderCalls += 1;
+            return { coords: { latitude: 1, longitude: 2 } };
+          },
+          async reverseGeocodeAsync() {
+            enrichProviderCalls += 1;
+            return [];
+          },
+        },
+      });
+      assert.equal(enriched, imported.receipt);
+      assert.equal(enrichProviderCalls, 0);
+    } finally {
+      Module._load = originalLoad;
+      bustSrcLibCache();
+    }
+
+    // --- Export stability: coords-only import => blank location cell ---
+    const exportPick = await pickReceiptFromLibrary({
+      imagePicker: makeLibraryPicker({
+        fileName: "export-import.jpg",
+        height: 100,
+        mimeType: "image/jpeg",
+        uri: "file://export-import.jpg",
+        width: 80,
+        exif: {
+          GPSLatitude: 33.9,
+          GPSLatitudeRef: "S",
+          GPSLongitude: 18.4,
+          GPSLongitudeRef: "W",
+        },
+      }),
+    });
+    assert.equal(exportPick.status, "selected");
+    const reviewed = buildReviewReceipt(
+      {
+        fields: {
+          category: "Meals",
+          date: "2026-07-08",
+          gross: 12,
+          net: 10,
+          vat: 2,
+          vendor: "Import Cafe",
+        },
+        validation: { issues: [], needsReview: false },
+      },
+      exportPick.receipt,
+    );
+    const writes = [];
+    await exportReviewedReceipts([reviewed], {
+      filename: "exif-import-pack",
+      async share() {},
+      async writeFile(uri, contents) {
+        writes.push({ contents, uri });
+      },
+    });
+    const pack = readZipBundle(writes[0].contents);
+    const csv = pack.byName["exif-import-pack.csv"].toString("utf8");
+    const dataRow = csv.split("\n")[1];
+    // location column is 7th (index 6) — blank for placeName null
+    assert.equal(
+      dataRow,
+      "Import Cafe,2026-07-08,10,2,12,Meals,,,,,file://export-import.jpg,ready,",
+    );
+  });
 }
 
 function createReceiptClient(response) {
@@ -6615,6 +7191,7 @@ async function main() {
   verifyMissingConfigDoesNotCrash();
   await verifySupabasePasswordGrant();
   await verifyReceiptCaptureModule();
+  await verifyGalleryExifGps();
   await verifyClaudeVisionClient();
   await verifyDefaultReceiptClientSelection();
   await verifyReceiptExtractionModule();

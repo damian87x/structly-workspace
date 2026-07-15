@@ -1,3 +1,5 @@
+const { parseExifLocation } = require("./exifLocation");
+
 const PERMISSION_DENIED_ERROR = "Receipt photo permission was denied.";
 
 function getDefaultImagePicker() {
@@ -175,11 +177,30 @@ async function pickReceiptFromLibrary({ imagePicker = getDefaultImagePicker() } 
     };
   }
 
-  const result = await imagePicker.launchImageLibraryAsync(getImageOptions(imagePicker));
+  // Library-only: request EXIF. Do NOT put exif on shared getImageOptions
+  // (camera path must stay unchanged — no exif leak).
+  const result = await imagePicker.launchImageLibraryAsync({
+    ...getImageOptions(imagePicker),
+    exif: true,
+  });
+
+  if (result?.canceled || result?.cancelled) {
+    return normalizePickerResult(
+      result,
+      "library",
+      (asset) => asset.creationTime ?? null,
+    );
+  }
+
+  const asset = result?.assets?.[0];
+  const location =
+    asset?.uri != null ? parseExifLocation(asset.exif) : null;
+
   return normalizePickerResult(
     result,
     "library",
     (asset) => asset.creationTime ?? null,
+    location ? { location } : null,
   );
 }
 
