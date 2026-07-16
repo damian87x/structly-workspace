@@ -4,6 +4,10 @@ const DEVICE_SIGNAL_DECISIONS = {
   DECLINED: "declined",
 };
 
+// Module-private sentinel. Never exported. The only mint site is the
+// resume() closure returned by selectReceiptWithGate on camera+PENDING.
+const GRANT = Symbol("device-signal-grant");
+
 const DEVICE_SIGNAL_RATIONALE = {
   title: "Use location and calendar",
   body:
@@ -11,6 +15,10 @@ const DEVICE_SIGNAL_RATIONALE = {
   continueLabel: "Continue",
   declineLabel: "Not now",
 };
+
+function isGrant(x) {
+  return x === GRANT;
+}
 
 function resolveDeviceSignalOptions(decision) {
   if (decision === DEVICE_SIGNAL_DECISIONS.DECLINED) {
@@ -26,18 +34,31 @@ async function selectReceiptWithGate({
   showRationale,
   capture,
 } = {}) {
+  // Lazy require keeps the cycle free: leaves top-level require this module
+  // for isGrant; this module only loads receiptCapture at call time.
+  const captureApi = capture || require("./receiptCapture");
+
   if (source === "camera" && decision === DEVICE_SIGNAL_DECISIONS.PENDING) {
     if (typeof showRationale === "function") {
       showRationale();
     }
 
-    return { status: "rationale-required", receipt: null, error: null };
+    // resume is the ONLY mint site — closes over GRANT unconditionally.
+    // Closure is reusable: each call captures with a fresh grant reference.
+    return {
+      status: "rationale-required",
+      receipt: null,
+      error: null,
+      resume: async () =>
+        captureApi.takeReceiptPhoto({ useLocation: true, grant: GRANT }),
+      decline: async () => captureApi.takeReceiptPhoto({ useLocation: false }),
+    };
   }
 
-  const captureApi = capture || require("./receiptCapture");
-  const options = resolveDeviceSignalOptions(decision);
-
+  // Direct non-PENDING camera path: capture WITHOUT grant.
+  // resolveDeviceSignalOptions confers NO authority; decision values mint nothing.
   if (source === "camera") {
+    const options = resolveDeviceSignalOptions(decision);
     return captureApi.takeReceiptPhoto({ useLocation: options.useLocation });
   }
 
@@ -80,6 +101,7 @@ function classifySelectionResult(result) {
 module.exports = {
   DEVICE_SIGNAL_DECISIONS,
   DEVICE_SIGNAL_RATIONALE,
+  isGrant,
   resolveDeviceSignalOptions,
   selectReceiptWithGate,
   classifySelectionResult,

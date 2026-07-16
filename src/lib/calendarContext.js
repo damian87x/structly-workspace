@@ -30,6 +30,8 @@ const PERSONAL_EMAIL_DOMAINS = new Set([
   "yahoo.com",
 ]);
 
+const { isGrant } = require("./deviceSignalGate");
+
 function getDefaultCalendar() {
   return require("expo-calendar");
 }
@@ -315,6 +317,12 @@ async function getProviderEvents(calendar, calendarIds, startDate, endDate) {
 
 async function getReceiptCalendarContext(capturedAt, options = {}) {
   const settings = options || {};
+  // FIRST statement (before settings.calendar || getDefaultCalendar and
+  // requestCalendarPermissionsAsync): no authority without a real grant.
+  if (!isGrant(settings.grant)) {
+    return null;
+  }
+
   const capturedDate = parseDate(capturedAt);
 
   if (!capturedDate) {

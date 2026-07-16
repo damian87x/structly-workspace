@@ -105,6 +105,8 @@ async function enrichReceipt(
   const capturedAt = getCapturedAt(receipt);
   const capturedLocationCoords = getLocationCoordinates(receipt);
   const calendarProvider = getEventsCalendar(events) || calendar;
+  // Carrier: string key survives spread; Symbol value fails isGrant forgeries.
+  const grant = receipt?.context?.__deviceSignalGrant;
   const [locationContext, calendarContext] = await Promise.all([
     resolveSafely(
       () =>
@@ -112,6 +114,7 @@ async function enrichReceipt(
           ? getReceiptLocation({
               coords: capturedLocationCoords,
               location,
+              grant,
             })
           : null,
       null,
@@ -123,7 +126,10 @@ async function enrichReceipt(
         // provider via `settings.calendar || getDefaultCalendar()` and would
         // still prompt.
         useCalendar && capturedAt
-          ? getReceiptCalendarContext(capturedAt, { calendar: calendarProvider })
+          ? getReceiptCalendarContext(capturedAt, {
+              calendar: calendarProvider,
+              grant,
+            })
           : null,
       null,
     ),

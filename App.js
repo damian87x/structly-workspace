@@ -35,10 +35,10 @@ import { shouldSendHeartbeat } from "./src/lib/heartbeats";
 import {
   DEVICE_SIGNAL_DECISIONS,
   DEVICE_SIGNAL_RATIONALE,
-  classifySelectionResult,
   resolveDeviceSignalOptions,
   selectReceiptWithGate,
 } from "./src/lib/deviceSignalGate";
+import { createCaptureSession } from "./src/lib/captureSession";
 import {
   applyCorrection,
   resolveReviewQueueAfterExtraction,
@@ -246,6 +246,15 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   );
   const [pendingDeviceSignalSource, setPendingDeviceSignalSource] =
     useState(null);
+  // Per-mount capture session: survives re-renders so the gate continuation
+  // is not lost when showRationale flips pendingDeviceSignalSource.
+  const sessionRef = useRef(null);
+  if (!sessionRef.current) {
+    sessionRef.current = createCaptureSession({
+      gate: selectReceiptWithGate,
+      showRationale: () => setPendingDeviceSignalSource("camera"),
+    });
+  }
   const [receipt, setReceipt] = useState(null);
   const [reviewedReceipts, setReviewedReceipts] = useState([]);
   const [selectingSource, setSelectingSource] = useState(null);
@@ -472,7 +481,19 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     };
   }, [anonKey, backendConfig, email, session]);
 
-  async function handleReceiptSelection(source, decisionOverride) {
+  function applySessionOutput(out) {
+    // Status→UI routing (exact bindings for harness assertions):
+    // receipt → setReceipt(out.receipt); error → setCaptureError(out.error);
+    // rationale → showRationale callback; cancelled/in-flight → no state change.
+    if (out.status === "receipt") {
+      setReceipt(out.receipt);
+    } else if (out.status === "error") {
+      setCaptureError(out.error);
+    }
+    setDeviceSignalDecision(sessionRef.current.getDecision());
+  }
+
+  async function handleCameraCapture() {
     if (selectingSource) {
       return;
     }
@@ -483,29 +504,45 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
     setExportResult(null);
     setExtractionFailed(false);
     setLocationSuggestionMessage(null);
-    setSelectingSource(source);
+    setSelectingSource("camera");
 
     try {
-      const decision =
-        decisionOverride === undefined
-          ? deviceSignalDecision
-          : decisionOverride;
+      const out = await sessionRef.current.requestCapture();
+      applySessionOutput(out);
+    } catch (error) {
+      setCaptureError("Unable to open receipt images on this device.");
+    } finally {
+      setSelectingSource(null);
+    }
+  }
+
+  // Library route stays UNCHANGED: direct ungated selection (owner waiver).
+  async function handleLibrarySelection() {
+    if (selectingSource) {
+      return;
+    }
+
+    setCaptureError(null);
+    setConfirmedReceipt(false);
+    setExportError(null);
+    setExportResult(null);
+    setExtractionFailed(false);
+    setLocationSuggestionMessage(null);
+    setSelectingSource("library");
+
+    try {
       const result = await selectReceiptWithGate({
-        decision,
-        source,
-        showRationale: () => {
-          setPendingDeviceSignalSource(source);
-        },
+        decision: deviceSignalDecision,
+        source: "library",
       });
 
-      // FALL-THROUGH FIX: pure classifier — rationale-required must not set
-      // "Unable to select a receipt image." (false first-tap error).
-      const classified = classifySelectionResult(result);
-      if (classified.kind === "rationale" || classified.kind === "cancelled") {
+      if (result?.status === "cancelled") {
         return;
       }
-      if (classified.kind === "error") {
-        setCaptureError(classified.captureError);
+      if (result?.error || !result?.receipt) {
+        setCaptureError(
+          result?.error?.message || "Unable to select a receipt image.",
+        );
         return;
       }
 
@@ -518,19 +555,41 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
   }
 
   function handleDeviceSignalContinue() {
-    const source = pendingDeviceSignalSource || "camera";
-    setDeviceSignalDecision(DEVICE_SIGNAL_DECISIONS.ALLOWED);
     setPendingDeviceSignalSource(null);
-    // STALE-CLOSURE FIX: pass nextDecision explicitly; setState does not
-    // commit in the same tick, so a closure read would re-enter PENDING.
-    void handleReceiptSelection(source, DEVICE_SIGNAL_DECISIONS.ALLOWED);
+    if (selectingSource) {
+      return;
+    }
+    setCaptureError(null);
+    setSelectingSource("camera");
+    void (async () => {
+      try {
+        const out = await sessionRef.current.continueRationale();
+        applySessionOutput(out);
+      } catch (error) {
+        setCaptureError("Unable to open receipt images on this device.");
+      } finally {
+        setSelectingSource(null);
+      }
+    })();
   }
 
   function handleDeviceSignalDecline() {
-    const source = pendingDeviceSignalSource || "camera";
-    setDeviceSignalDecision(DEVICE_SIGNAL_DECISIONS.DECLINED);
     setPendingDeviceSignalSource(null);
-    void handleReceiptSelection(source, DEVICE_SIGNAL_DECISIONS.DECLINED);
+    if (selectingSource) {
+      return;
+    }
+    setCaptureError(null);
+    setSelectingSource("camera");
+    void (async () => {
+      try {
+        const out = await sessionRef.current.declineRationale();
+        applySessionOutput(out);
+      } catch (error) {
+        setCaptureError("Unable to open receipt images on this device.");
+      } finally {
+        setSelectingSource(null);
+      }
+    })();
   }
 
   function handleRetakeOrChange() {
@@ -1384,7 +1443,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(selectingSource) }}
                 disabled={Boolean(selectingSource)}
-                onPress={() => handleReceiptSelection("camera")}
+                onPress={handleCameraCapture}
                 style={({ pressed }) => [
                   styles.button,
                   styles.actionButton,
@@ -1402,7 +1461,7 @@ function CaptureScreen({ anonKey, backendConfig, email, session, vision }) {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: Boolean(selectingSource) }}
                 disabled={Boolean(selectingSource)}
-                onPress={() => handleReceiptSelection("library")}
+                onPress={handleLibrarySelection}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   styles.actionButton,

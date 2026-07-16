@@ -1,3 +1,5 @@
+const { isGrant } = require("./deviceSignalGate");
+
 function getDefaultLocation() {
   return require("expo-location");
 }
@@ -76,7 +78,12 @@ async function getReverseGeocodedLocation(provider, latitude, longitude) {
   return normalizeLocation(latitude, longitude, addresses);
 }
 
-async function getReceiptLocation({ location, coords } = {}) {
+async function getReceiptLocation({ location, coords, grant } = {}) {
+  // FIRST statement: no provider resolution / permission / read without grant.
+  if (!isGrant(grant)) {
+    return null;
+  }
+
   try {
     const capturedCoords = getCoordinates(coords);
     const provider = location || getDefaultLocation();

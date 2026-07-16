@@ -1,4 +1,5 @@
 const { parseExifLocation } = require("./exifLocation");
+const { isGrant } = require("./deviceSignalGate");
 
 const PERMISSION_DENIED_ERROR = "Receipt photo permission was denied.";
 
@@ -53,6 +54,8 @@ function hasLocationCaptureProvider(location) {
   );
 }
 
+// No grant guard here (F5): the single guard lives in takeReceiptPhoto.
+// A second unreachable guard is dead code whose mutant stays green.
 async function getCapturedLocation(location) {
   try {
     if (!hasLocationCaptureProvider(location)) {
@@ -129,14 +132,12 @@ async function takeReceiptPhoto({
   location,
   now = () => new Date().toISOString(),
   useLocation = true,
+  grant,
 } = {}) {
-  const useDefaultProviders = !imagePicker && location === undefined;
+  // SINGLE guard (F5): wantLocation before any provider resolution.
+  const wantLocation = useLocation && isGrant(grant);
+
   const picker = imagePicker || getDefaultImagePicker();
-  const locationProvider = location === undefined
-    ? useDefaultProviders
-      ? getDefaultLocation()
-      : null
-    : location;
   const permission = await picker.requestCameraPermissionsAsync();
 
   if (!hasPermission(permission)) {
@@ -155,12 +156,25 @@ async function takeReceiptPhoto({
     return normalized;
   }
 
-  if (useLocation) {
+  const context = {};
+
+  if (wantLocation) {
+    const locationProvider =
+      location === undefined ? getDefaultLocation() : location;
     const capturedLocation = await getCapturedLocation(locationProvider);
 
     if (capturedLocation) {
-      normalized.receipt.context = { location: capturedLocation };
+      context.location = capturedLocation;
     }
+  }
+
+  // Granted capture attaches the grant carrier (string key, Symbol value).
+  if (isGrant(grant)) {
+    context.__deviceSignalGrant = grant;
+  }
+
+  if (Object.keys(context).length > 0) {
+    normalized.receipt.context = context;
   }
 
   return normalized;
