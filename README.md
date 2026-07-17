@@ -8,6 +8,8 @@ iOS-first (React Native / Expo SDK 54), Android fast-follow. No OAuth, no connec
 
 - [`docs/spec.md`](docs/spec.md) — product spec & build plan (v4.1, corrected after Model Council review)
 - [`docs/council/`](docs/council) — Model Council reviews of the v2 spec (Claude Opus 4.8, GPT 5.5, Gemini 3.1 Pro, synthesis) that drove the v3→v4 corrections
+- [`docs/research/winning-mobile-ai-assistant-app-research.md`](docs/research/winning-mobile-ai-assistant-app-research.md) — deep research: winning mobile AI assistant apps in 2026, noise-reduction features, permission feasibility (iOS/Android/Expo), Reddit demand evidence, competitors, and top-3 feature recommendation
+- [`docs/research/inkbox-composio-expo-architecture.md`](docs/research/inkbox-composio-expo-architecture.md) — technical architecture for wiring Composio (read layer) + Inkbox (reach layer: SMS/voice escalation, shield email) into the Expo app
 
 ## Status
 
